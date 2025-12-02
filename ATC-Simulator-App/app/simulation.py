@@ -90,6 +90,43 @@ WAYPOINTS: dict[str, Waypoint] = {
         altitude_restriction=32,
         description="Runway 34 threshold"
     ),
+    # Additional waypoints for AI agent traffic management
+    "ALPHA": Waypoint(
+        name="ALPHA",
+        position=Position(x=-15, y=15),
+        altitude_restriction=5000,
+        description="Northwest sequencing point"
+    ),
+    "BRAVO": Waypoint(
+        name="BRAVO",
+        position=Position(x=15, y=15),
+        altitude_restriction=5000,
+        description="Northeast sequencing point"
+    ),
+    "CHARLIE": Waypoint(
+        name="CHARLIE",
+        position=Position(x=-15, y=-15),
+        altitude_restriction=4000,
+        description="Southwest approach setup"
+    ),
+    "DELTA": Waypoint(
+        name="DELTA",
+        position=Position(x=15, y=-15),
+        altitude_restriction=4000,
+        description="Southeast approach setup"
+    ),
+    "ECHO": Waypoint(
+        name="ECHO",
+        position=Position(x=0, y=-22),
+        altitude_restriction=2500,
+        description="Extended final approach fix"
+    ),
+    "HOTEL": Waypoint(
+        name="HOTEL",
+        position=Position(x=-18, y=0),
+        altitude_restriction=3500,
+        description="Western holding point"
+    ),
 }
 
 # Landing rules

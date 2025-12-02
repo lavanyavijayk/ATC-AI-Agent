@@ -64,7 +64,6 @@ class ATCSimulator {
         document.getElementById('ruleSpd').textContent = `${r.min_speed}-${r.max_speed} kt`;
         document.getElementById('ruleDist').textContent = `< ${r.max_distance} nm`;
         document.getElementById('ruleWpt').textContent = r.required_waypoint;
-        document.getElementById('ruleHdg').textContent = `± ${r.aligned_heading_tolerance}°`;
     }
     
     setupCanvas() {
@@ -351,6 +350,9 @@ class ATCSimulator {
                 color = '#f59e0b';
             } else if (name === 'NORTH') {
                 color = '#22c55e';  // Green for departure exit
+            } else if (['ALPHA', 'BRAVO', 'CHARLIE', 'DELTA', 'ECHO', 'HOTEL'].includes(name)) {
+                color = '#06b6d4';  // Cyan for AI sequencing waypoints
+                size = 5;
             } else {
                 color = '#3b82f6';
             }

@@ -45,6 +45,7 @@ Open your browser to `http://localhost:8000`
 
 ## Waypoints
 
+### Entry Points
 | Waypoint | Position (nm) | Altitude | Description |
 |----------|---------------|----------|-------------|
 | NORTH | (0, 25) | 6000' | Departure exit / Entry point |
@@ -52,12 +53,28 @@ Open your browser to `http://localhost:8000`
 | EAST | (25, 0) | 6000' | Entry point |
 | SHORT_EAST | (15, 0) | 4000' | Short eastern entry point |
 | WEST | (-25, 0) | 6000' | Entry point |
+
+### Traffic Pattern
+| Waypoint | Position (nm) | Altitude | Description |
+|----------|---------------|----------|-------------|
 | DOWNWIND | (-9, 6) | 2000' | Downwind leg (west of runway) |
 | BASE | (-9, -12) | 1500' | Base turn point |
 | FINAL | (0, -15) | 1000' | Final approach (aligned with RWY 34) |
 | RUNWAY | (0, 0) | 32' | Runway threshold |
 
+### AI Sequencing Waypoints
+| Waypoint | Position (nm) | Altitude | Description |
+|----------|---------------|----------|-------------|
+| ALPHA | (-15, 15) | 5000' | Northwest sequencing point |
+| BRAVO | (15, 15) | 5000' | Northeast sequencing point |
+| CHARLIE | (-15, -15) | 4000' | Southwest approach setup |
+| DELTA | (15, -15) | 4000' | Southeast approach setup |
+| ECHO | (0, -22) | 2500' | Extended final approach fix |
+| HOTEL | (-18, 0) | 3500' | Western holding point |
+
 **Traffic Pattern:** U-shaped - DOWNWIND → BASE → FINAL → RUNWAY
+
+**AI Sequencing:** Use ALPHA, BRAVO, CHARLIE, DELTA, ECHO, HOTEL waypoints to manage traffic flow and aircraft separation before entering the traffic pattern.
 
 ## Landing Rules
 

@@ -40,11 +40,13 @@ while True:
                         updated = True
 
                     db.update_flight(db_data["id"], flight)
+                if flight['passed_waypoints'][-1] == flight['target_waypoint']:
+                    updated = True
 
                 if flight["status"] in ["landing", "takeoff"]:
                     continue
 
-                if updated:
+                if updated or (flight['flight_type']=="departure" and not flight['cleared_for_takeoff']):
                     main(flight, airport)
 
         else:

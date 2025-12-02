@@ -88,4 +88,3 @@ class LandingRules(BaseModel):
     max_speed: float = Field(..., description="Maximum approach speed")
     max_distance: float = Field(..., description="Maximum distance from runway")
     required_waypoint: str = Field(..., description="Required waypoint to pass")
-    aligned_heading_tolerance: float = Field(..., description="Heading alignment tolerance in degrees")

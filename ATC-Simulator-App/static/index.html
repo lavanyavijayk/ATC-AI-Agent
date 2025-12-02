@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-ATC Simulator - KRNT</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Oxanium:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Failure Overlay -->
+        <div class="failure-overlay" id="failureOverlay">
+            <div class="failure-content">
+                <div class="failure-icon">💥</div>
+                <h1>SIMULATION FAILED</h1>
+                <p class="failure-reason" id="failureReason">Collision detected</p>
+                <div class="failure-stats">
+                    <div class="stat-item">
+                        <span class="stat-value" id="finalLanded">0</span>
+                        <span class="stat-label">Landed</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="finalDeparted">0</span>
+                        <span class="stat-label">Departed</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="finalNearMisses">0</span>
+                        <span class="stat-label">Near Misses</span>
+                    </div>
+                </div>
+                <button class="restart-btn large" id="failureRestartBtn">🔄 Restart Simulation</button>
+            </div>
+        </div>
+
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1 class="title">AI-ATC</h1>
+                <span class="subtitle">Air Traffic Control</span>
+            </div>
+            <div class="header-center">
+                <div class="airport-info">
+                    <span class="airport-code">KRNT</span>
+                    <span class="airport-name">Renton Municipal</span>
+                    <span class="runway-info">RWY 34 | HDG 340°</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="status-indicator" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+                <div class="clock" id="clock">--:--:--Z</div>
+            </div>
+        </header>
+
+        <!-- Stats Bar -->
+        <div class="stats-bar">
+            <div class="stat-group">
+                <span class="stat-label">Landed:</span>
+                <span class="stat-value green" id="landedCount">0</span>
+            </div>
+            <div class="stat-group">
+                <span class="stat-label">Departed:</span>
+                <span class="stat-value blue" id="departedCount">0</span>
+            </div>
+            <div class="stat-group">
+                <span class="stat-label">Near Misses:</span>
+                <span class="stat-value amber" id="nearMissCount">0</span>
+            </div>
+            <div class="stat-group speed-control">
+                <span class="stat-label">Speed:</span>
+                <button class="speed-btn" data-speed="1">1x</button>
+                <button class="speed-btn" data-speed="2">2x</button>
+                <button class="speed-btn" data-speed="5">5x</button>
+                <button class="speed-btn" data-speed="10">10x</button>
+            </div>
+            <button class="restart-btn" id="restartBtn">🔄 Restart</button>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Map Display -->
+            <div class="map-section">
+                <div class="map-container">
+                    <canvas id="mapCanvas"></canvas>
+                    <div class="map-overlay">
+                        <div class="scale-indicator">Scale: <span id="scaleValue">1nm</span> = <span id="pixelValue">--</span>px</div>
+                    </div>
+                </div>
+                <div class="map-controls">
+                    <button class="control-btn" id="zoomIn">+ Zoom</button>
+                    <button class="control-btn" id="zoomOut">− Zoom</button>
+                    <div class="control-divider"></div>
+                    <button class="control-btn spawn-btn" id="spawnArrival">✈ Spawn Arrival</button>
+                    <button class="control-btn spawn-btn departure" id="spawnDeparture">✈ Spawn Departure</button>
+                </div>
+            </div>
+
+            <!-- Flight Strips Panel -->
+            <div class="strips-panel">
+                <div class="panel-header">
+                    <h2>Flights</h2>
+                    <div class="panel-tabs">
+                        <button class="tab-btn active" data-tab="all">Active</button>
+                        <button class="tab-btn" data-tab="arrivals">Arrivals</button>
+                        <button class="tab-btn" data-tab="departures">Departures</button>
+                        <button class="tab-btn" data-tab="history">History</button>
+                    </div>
+                </div>
+                <div class="strips-container" id="flightStrips">
+                    <div class="no-flights">No active flights. Click "Spawn Arrival" to add one.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Selected Flight Detail -->
+        <div class="detail-panel" id="detailPanel">
+            <div class="detail-header">
+                <h3 id="detailCallsign">Select a flight</h3>
+                <button class="close-btn" id="closeDetail">×</button>
+            </div>
+            <div class="detail-content" id="detailContent">
+                <p class="no-selection">Click on a flight to view details and issue commands</p>
+            </div>
+        </div>
+
+        <!-- Landing Rules Info -->
+        <div class="rules-panel" id="rulesPanel">
+            <div class="rules-header">
+                <span>Landing Rules</span>
+                <button class="toggle-btn" id="toggleRules">▼</button>
+            </div>
+            <div class="rules-content" id="rulesContent">
+                <div class="rule-item"><span>Max Altitude:</span> <span id="ruleAlt">--</span></div>
+                <div class="rule-item"><span>Speed Range:</span> <span id="ruleSpd">--</span></div>
+                <div class="rule-item"><span>Max Distance:</span> <span id="ruleDist">--</span></div>
+                <div class="rule-item"><span>Required WPT:</span> <span id="ruleWpt">--</span></div>
+                <div class="rule-item"><span>HDG Tolerance:</span> <span id="ruleHdg">--</span></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

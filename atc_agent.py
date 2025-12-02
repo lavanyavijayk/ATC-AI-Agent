@@ -46,42 +46,68 @@ class LLM:
     
     Provides a simple interface to invoke the Gemini model with
     configured generation parameters for ATC decision-making.
+    Includes automatic retry logic with configurable delays.
     """
+    
+    # Retry configuration
+    MAX_RETRIES = 3
+    RETRY_DELAY_SECONDS = 60  # 1 minute between retries
     
     def __init__(self):
         """Initialize the LLM wrapper."""
         self.model_name = 'gemini-2.5-flash'
         print(f"[LLM] Initialized with model: {self.model_name}")
+        print(f"[LLM] Retry config: max_retries={self.MAX_RETRIES}, delay={self.RETRY_DELAY_SECONDS}s")
 
     def invoke(self, prompt: str) -> str:
         """
         Send a prompt to the Gemini model and get a response.
         
+        Implements retry logic with 1-minute delay between attempts
+        in case of API failures or rate limiting.
+        
         Args:
             prompt: The text prompt to send to the model
             
         Returns:
-            The model's response text, or None if an error occurred
+            The model's response text, or None if all retries failed
         """
-        try:
-            print("[LLM] Invoking Gemini model...")
-            model = genai.GenerativeModel(self.model_name)
-            
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.1,  # Low temperature for consistent, deterministic outputs
-                    top_p=0.95,
+        last_error = None
+        
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                print(f"[LLM] Invoking Gemini model (attempt {attempt}/{self.MAX_RETRIES})...")
+                model = genai.GenerativeModel(self.model_name)
+                
+                response = model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.1,  # Low temperature for consistent, deterministic outputs
+                        top_p=0.95,
+                    )
                 )
-            )
+                
+                # Check if we got a valid response
+                if response and response.text:
+                    response_preview = response.text[:200] if len(response.text) > 200 else response.text
+                    print(f"[LLM] Response received: {response_preview}...")
+                    return response.text
+                else:
+                    print(f"[LLM] WARNING: Empty response received on attempt {attempt}")
+                    last_error = "Empty response from model"
+                
+            except Exception as e:
+                last_error = str(e)
+                print(f"[LLM] ERROR on attempt {attempt}: {e}")
             
-            response_preview = response.text[:200] if len(response.text) > 200 else response.text
-            print(f"[LLM] Response received: {response_preview}...")
-            return response.text
-            
-        except Exception as e:
-            print(f"[LLM] ERROR: {e}")
-            return None
+            # If this wasn't the last attempt, wait before retrying
+            if attempt < self.MAX_RETRIES:
+                print(f"[LLM] Waiting {self.RETRY_DELAY_SECONDS} seconds before retry...")
+                time.sleep(self.RETRY_DELAY_SECONDS)
+        
+        # All retries exhausted
+        print(f"[LLM] FAILED: All {self.MAX_RETRIES} attempts exhausted. Last error: {last_error}")
+        return None
 
 
 # ============================================================================
@@ -240,11 +266,29 @@ class ATCAgent:
         """
         print("[API] Fetching other flights...")
         try:
-            response = requests.get(f"{API_BASE_URL}/flights/")
+            response = requests.get(f"{API_BASE_URL}/flights/", timeout=5)
+            
+            # Check if request was successful
+            if response.status_code != 200:
+                print(f"[API] WARNING: flights endpoint returned status {response.status_code}")
+                return []
+            
+            # Check if response has content
+            if not response.text.strip():
+                print("[API] WARNING: flights endpoint returned empty response")
+                return []
+            
             flights = response.json()
             other_flights = [f for f in flights if f["callsign"] != self.flight_id]
-            print(f"[API] Found {len(other_flights)} other flights")
+            print(f"[API] Found {len(other_flights)} other flights, {other_flights}, {self.flight_id}")
             return other_flights
+            
+        except requests.exceptions.ConnectionError:
+            print("[API] ERROR: Cannot connect to simulator API. Is the server running?")
+            return []
+        except requests.exceptions.Timeout:
+            print("[API] ERROR: Request timed out")
+            return []
         except Exception as e:
             print(f"[API] ERROR fetching flights: {e}")
             return []
@@ -254,30 +298,94 @@ class ATCAgent:
         Fetch landing rules from the simulator API.
         
         Returns:
-            Dictionary containing landing rules
+            Dictionary containing landing rules, or default rules if unavailable
         """
         print("[API] Fetching landing rules...")
+        
+        # Default landing rules as fallback
+        default_rules = {
+            "minimum_separation_nm": 3,
+            "minimum_vertical_separation_ft": 1000,
+            "final_approach_altitude_ft": 1000,
+            "final_approach_speed_kts": 100,
+            "runway": "34"
+        }
+        
         try:
-            response = requests.get(f"{API_BASE_URL}/landing-rules")
-            return response.json()
+            response = requests.get(f"{API_BASE_URL}/landing-rules", timeout=5)
+            
+            # Check if request was successful
+            if response.status_code != 200:
+                print(f"[API] WARNING: landing-rules endpoint returned status {response.status_code}, using defaults")
+                return default_rules
+            
+            # Check if response has content
+            if not response.text.strip():
+                print("[API] WARNING: landing-rules endpoint returned empty response, using defaults")
+                return default_rules
+            
+            rules = response.json()
+            print("[API] Landing rules fetched successfully")
+            return rules
+            
+        except requests.exceptions.ConnectionError:
+            print("[API] ERROR: Cannot connect to simulator API, using default landing rules")
+            return default_rules
+        except requests.exceptions.Timeout:
+            print("[API] ERROR: Request timed out, using default landing rules")
+            return default_rules
         except Exception as e:
-            print(f"[API] ERROR fetching landing rules: {e}")
-            return {}
+            print(f"[API] ERROR fetching landing rules: {e}, using defaults")
+            return default_rules
 
     def _get_waypoints(self) -> dict:
         """
         Fetch waypoint information from the simulator API.
         
         Returns:
-            Dictionary containing waypoint data
+            Dictionary containing waypoint data, or default waypoints if unavailable
         """
         print("[API] Fetching waypoints...")
+        
+        # Default waypoints as fallback
+        default_waypoints = {
+            "NORTH": {"x": 0, "y": 25, "altitude": 6000},
+            "EAST": {"x": 25, "y": 0, "altitude": 6000},
+            "SOUTH": {"x": 0, "y": -25, "altitude": 6000},
+            "WEST": {"x": -25, "y": 0, "altitude": 6000},
+            "SHORT_EAST": {"x": 15, "y": 0, "altitude": 4000},
+            "DOWNWIND": {"x": 5, "y": 5, "altitude": 2000},
+            "BASE": {"x": 0, "y": 5, "altitude": 1500},
+            "FINAL": {"x": 0, "y": 2, "altitude": 1000},
+            "RUNWAY": {"x": 0, "y": 0, "altitude": 0}
+        }
+        
         try:
-            response = requests.get(f"{API_BASE_URL}/waypoints")
-            return response.json()
+            response = requests.get(f"{API_BASE_URL}/waypoints", timeout=5)
+            
+            # Check if request was successful
+            if response.status_code != 200:
+                print(f"[API] WARNING: waypoints endpoint returned status {response.status_code}, using defaults")
+                return default_waypoints
+            
+            # Check if response has content
+            if not response.text.strip():
+                print("[API] WARNING: waypoints endpoint returned empty response, using defaults")
+                return default_waypoints
+            
+            waypoints = response.json()
+            print("[API] Waypoints fetched successfully")
+            return waypoints
+            
+        except requests.exceptions.ConnectionError:
+            print("[API] ERROR: Cannot connect to simulator API, using default waypoints")
+            return default_waypoints
+        except requests.exceptions.Timeout:
+            print("[API] ERROR: Request timed out, using default waypoints")
+            return default_waypoints
         except Exception as e:
-            print(f"[API] ERROR fetching waypoints: {e}")
-            return {}
+            print(f"[API] ERROR fetching waypoints: {e}, using defaults")
+            return default_waypoints
     
     # ========================================================================
     # Workflow Nodes
@@ -355,6 +463,7 @@ class ATCAgent:
         Returns:
             Updated state with landing command
         """
+        # import pdb; pdb.set_trace()
         flight_info = state["flight_info"]
         callsign = flight_info.get("callsign", self.flight_id)
         
@@ -407,11 +516,11 @@ class ATCAgent:
 
         You must route aircraft through ONE of these approved patterns:
 
-        1. **NORTH → DOWNWIND → BASE → FINAL → RUNWAY 34**
-        2. **EAST → DOWNWIND → BASE → FINAL → RUNWAY 34**
-        3. **SHORT_EAST → DOWNWIND → BASE → FINAL → RUNWAY 34**
-        4. **SOUTH → SHORT_EAST → DOWNWIND → BASE → FINAL → RUNWAY 34**
-        5. **WEST → DOWNWIND → BASE → FINAL → RUNWAY 34**
+        1. **NORTH → DOWNWIND → BASE → FINAL → RUNWAY**
+        2. **EAST → DOWNWIND → BASE → FINAL → RUNWAY**
+        3. **SHORT_EAST → DOWNWIND → BASE → FINAL → RUNWAY**
+        4. **SOUTH → SHORT_EAST → DOWNWIND → BASE → FINAL → RUNWAY**
+        5. **WEST → DOWNWIND → BASE → FINAL → RUNWAY**
 
         **Important**: If runway separation requires delaying an aircraft, vector it to SHORT_EAST for sequencing before continuing to DOWNWIND.
 
@@ -478,20 +587,13 @@ class ATCAgent:
         Your response must be ONLY a valid JSON object in ONE of these three formats:
 
         ### Format 1: Vector to Waypoint
-        Use when directing aircraft to a named waypoint in the pattern:
+        Use when directing aircraft to a named waypoint in the pattern, always prefer waypoints over headings:
         ```json
         {{"waypoint": "WAYPOINT_NAME", "altitude": TARGET_ALT, "speed": TARGET_SPEED}}
         ```
         Example: {{"waypoint": "DOWNWIND", "altitude": 2000, "speed": 150}}
 
-        ### Format 2: Vector by Heading
-        Use when precise heading control is needed (non-standard vectors, conflict resolution):
-        ```json
-        {{"heading": HEADING_DEGREES, "altitude": TARGET_ALT, "speed": TARGET_SPEED}}
-        ```
-        Example: {{"heading": 270, "altitude": 3000, "speed": 180}}
-
-        ### Format 3: Landing Clearance
+        ### Format 2: Landing Clearance
         Use ONLY when all landing criteria are satisfied:
         ```json
         {{"clear_to_land": true}}
@@ -526,7 +628,7 @@ class ATCAgent:
             
             state["command"] = command
             state["messages"].append({"role": "assistant", "content": llm_output})
-            
+            state["result"] = command
             print(f"[LANDING] Generated command: {command}")
             
         except Exception as e:
@@ -659,7 +761,7 @@ class ATCAgent:
             
             state["command"] = command
             state["messages"].append({"role": "assistant", "content": llm_output})
-            
+            state["result"] = command
             print(f"[TAKEOFF] Generated command: {command}")
             
         except Exception as e:
@@ -706,8 +808,9 @@ class ATCAgent:
         
         Checks for:
         - Takeoff conflicts with landing/departing aircraft
-        - Landing route conflicts with other aircraft
-        - Collision risks using predictive detection
+        - Landing pattern conflicts (DOWNWIND->BASE->FINAL->RUNWAY)
+        - Clear to land validation (no aircraft on FINAL, RUNWAY, or taking off)
+        - Collision risks for en-route aircraft using predictive detection
         
         Args:
             state: Current workflow state
@@ -716,6 +819,9 @@ class ATCAgent:
             Updated state with validation result
         """
         command = state["command"]
+        if command.get("error"):
+            return state
+
         flight_info = state["flight_info"]
         status = flight_info.get("status", "")
         
@@ -723,97 +829,75 @@ class ATCAgent:
         print(f"[SAFETY] Flight status: {status}")
         
         # Get last checkpoint from passed waypoints
-        passed_waypoints = self.flight_info.get("passed_waypoints", [])
+        passed_waypoints = flight_info.get("passed_waypoints", [])
         last_checkpoint = passed_waypoints[-1] if passed_waypoints else ""
         print(f"[SAFETY] Last checkpoint: {last_checkpoint or 'None'}")
         
         # Fetch other flights for conflict detection
         flights = self._get_other_flights()
         
+        # Landing pattern waypoints
+        landing_pattern_waypoints = ["DOWNWIND", "BASE", "FINAL", "RUNWAY"]
+        
         # ----- TAKEOFF SAFETY CHECK -----
         if status in ["ready_for_takeoff", "taking_off"]:
             print("[SAFETY] Performing takeoff safety checks...")
             
-            for flight in flights:
-                flight_passed = flight.get("passed_waypoints", [])
-                flight_last_checkpoint = flight_passed[-1] if flight_passed else ""
-                flight_status = flight.get("status", "")
-                
-                # Check if runway is occupied or aircraft on final
-                is_runway_conflict = (
-                    flight_last_checkpoint in ["FINAL", "RUNWAY"] or
-                    flight_status == "taking_off"
-                )
-                
-                if is_runway_conflict and command.get("cleared_for_takeoff"):
-                    print(f"[SAFETY] FAILED: Runway conflict with {flight.get('callsign', 'unknown')}")
-                    state['messages'].append({
-                        "role": "user",
-                        "content": f"Failed safety check for takeoff - runway conflict with: {flight}"
-                    })
-                    state["result"] = {}
-                    return state
+            if command.get("cleared_for_takeoff"):
+                for flight in flights:
+                    flight_passed = flight.get("passed_waypoints", [])
+                    flight_last_checkpoint = flight_passed[-1] if flight_passed else ""
+                    flight_status = flight.get("status", "")
+                    
+                    # Check if runway is occupied or aircraft on final/taking off
+                    is_runway_conflict = (
+                        flight_last_checkpoint in ["FINAL", "RUNWAY"] or
+                        flight_status in ["taking_off", "landing"]
+                    )
+                    
+                    if is_runway_conflict:
+                        print(f"[SAFETY] FAILED: Runway conflict with {flight.get('callsign', 'unknown')}")
+                        state['messages'].append({
+                            "role": "user",
+                            "content": f"Failed safety check for takeoff - runway conflict with: {flight}"
+                        })
+                        state["result"] = {}
+                        return state
             
             # Takeoff safety check passed
             print("[SAFETY] Takeoff safety check PASSED")
             state["result"] = command
             return state
         
-        # ----- LANDING SAFETY CHECK -----
-        # Define next checkpoint mapping for landing pattern
-        next_checkpoint_map = {
-            "DOWNWIND": "BASE",
-            "BASE": "FINAL",
-            "FINAL": "RUNWAY",
-            "RUNWAY": "RUNWAY"
-        }
-        
-        # Check if we're in the landing pattern
-        if last_checkpoint in next_checkpoint_map:
-            target_waypoint = command.get("waypoint", "")
-            expected_next = next_checkpoint_map.get(last_checkpoint, "")
-            
-            # If command is directing to the next sequential waypoint, check for conflicts
-            if target_waypoint and target_waypoint == expected_next:
-                print(f"[SAFETY] Checking landing pattern conflict: {last_checkpoint} -> {target_waypoint}")
-                
-                for flight in flights:
-                    flight_passed = flight.get("passed_waypoints", [])
-                    flight_last = flight_passed[-1] if flight_passed else ""
-                    flight_target = flight.get("target_waypoint", "")
-                    
-                    # Check if another flight is on same route segment
-                    if flight_last == last_checkpoint and flight_target == target_waypoint:
-                        print(f"[SAFETY] FAILED: Route conflict with {flight.get('callsign', 'unknown')}")
-                        state['messages'].append({
-                            "role": "user",
-                            "content": f"Failed safety check - route conflict with: {flight}"
-                        })
-                        state["result"] = {}
-                        return state
-        
-        # For aircraft not in landing pattern, use collision detection
-        elif last_checkpoint not in ["DOWNWIND", "BASE", "FINAL", "RUNWAY"]:
-            print("[SAFETY] Performing collision detection for en-route aircraft...")
-            
-            from collision_detection import predict_conflict
+        # ----- CLEAR TO LAND SAFETY CHECK -----
+        if command.get("clear_to_land"):
+            print("[SAFETY] Performing clear-to-land safety checks...")
             
             for flight in flights:
-                if predict_conflict(flight_info, flight):
-                    print(f"[SAFETY] FAILED: Collision risk with {flight.get('callsign', 'unknown')}")
+                flight_passed = flight.get("passed_waypoints", [])
+                flight_last_checkpoint = flight_passed[-1] if flight_passed else ""
+                flight_status = flight.get("status", "")
+                
+                # Check for conflicts: any flight on FINAL, RUNWAY, or taking off
+                is_landing_conflict = (
+                    flight_last_checkpoint in ["FINAL", "RUNWAY"] or
+                    flight_status in ["taking_off", "landing"]
+                )
+                
+                if is_landing_conflict:
+                    print(f"[SAFETY] FAILED: Landing conflict with {flight.get('callsign', 'unknown')} "
+                          f"(checkpoint: {flight_last_checkpoint}, status: {flight_status})")
                     state['messages'].append({
                         "role": "user",
-                        "content": f"Failed safety check - collision risk (<1000ft separation) with: {flight}"
+                        "content": f"Failed safety check for landing - conflict with: {flight}"
                     })
                     state["result"] = {}
                     return state
-        
-        # All safety checks passed
-        print("[SAFETY] All safety checks PASSED")
-        state["result"] = command
-        
-        # Handle runway assignment for landing clearance
-        if command.get('clear_to_land'):
+            
+            # Clear to land safety check passed - assign runway
+            print("[SAFETY] Clear-to-land safety check PASSED")
+            state["result"] = command
+            
             print("[SAFETY] Assigning runway for landing clearance...")
             try:
                 current_time = time.time()
@@ -825,6 +909,74 @@ class ATCAgent:
                 print("[SAFETY] Runway assigned successfully")
             except Exception as e:
                 print(f"[SAFETY] WARNING: Failed to assign runway: {e}")
+            
+            return state
+        
+        # ----- LANDING PATTERN SAFETY CHECK (DOWNWIND -> BASE -> FINAL -> RUNWAY) -----
+        if last_checkpoint in landing_pattern_waypoints:
+            target_waypoint = command.get("waypoint", "")
+            print(f"[SAFETY] Checking landing pattern: {last_checkpoint} -> {target_waypoint}")
+            
+            for flight in flights:
+                flight_passed = flight.get("passed_waypoints", [])
+                flight_last = flight_passed[-1] if flight_passed else ""
+                flight_target = flight.get("target_waypoint", "")
+                
+                # Check if another flight is at the same checkpoint heading to same target
+                if flight_last == last_checkpoint and flight_target == target_waypoint:
+                    print(f"[SAFETY] FAILED: Route conflict with {flight.get('callsign', 'unknown')} "
+                          f"(both at {last_checkpoint} heading to {target_waypoint})")
+                    state['messages'].append({
+                        "role": "user",
+                        "content": f"Failed safety check - route conflict with: {flight}"
+                    })
+                    state["result"] = {}
+                    return state
+            
+            print("[SAFETY] Landing pattern safety check PASSED")
+            state["result"] = command
+            return state
+        
+        # ----- EN-ROUTE COLLISION DETECTION (for random waypoints) -----
+        # Only check against non-landing flights
+        print("[SAFETY] Performing collision detection for en-route aircraft...")
+        
+        from collision_detection import predict_conflict
+        
+        for flight in flights:
+            flight_status = flight.get("status", "")
+            flight_passed = flight.get("passed_waypoints", [])
+            flight_last = flight_passed[-1] if flight_passed else ""
+            
+            # Skip landing flights (in the landing pattern or actively landing)
+            if flight_status in ["landing", "on_final"] or flight_last in landing_pattern_waypoints:
+                print(f"[SAFETY] Skipping landing flight {flight.get('callsign', 'unknown')}")
+                continue
+            
+            # Use predict_conflict - check the 'will_conflict' key in the result
+            conflict_result = predict_conflict(
+                flight_info, 
+                flight,
+                horizon_min=2.0,  # Check 2 minutes ahead
+                horizontal_threshold_nm=5.0,
+                vertical_threshold_ft=1000.0
+            )
+            
+            if conflict_result.get("will_conflict"):
+                print(f"[SAFETY] FAILED: Collision risk with {flight.get('callsign', 'unknown')}")
+                print(f"[SAFETY] Conflict details: time={conflict_result.get('time_of_conflict_min', 'N/A'):.2f}min, "
+                      f"h_sep={conflict_result.get('min_horizontal_nm', 'N/A'):.2f}NM, "
+                      f"v_sep={conflict_result.get('min_vertical_ft', 'N/A'):.0f}ft")
+                state['messages'].append({
+                    "role": "user",
+                    "content": f"Failed safety check - collision risk (<1000ft separation) with: {flight}"
+                })
+                state["result"] = {}
+                return state
+        
+        # All safety checks passed
+        print("[SAFETY] All safety checks PASSED")
+        state["result"] = command
         
         return state
     

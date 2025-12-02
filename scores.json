@@ -1,0 +1,47 @@
+[
+  {
+    "datetime": "2025-11-28T17:17:44.216458",
+    "landed": 1,
+    "departed": 0,
+    "near_misses": 0,
+    "failed": false,
+    "failure_reason": null,
+    "duration_seconds": 748.433275
+  },
+  {
+    "datetime": "2025-11-28T17:51:29.543888",
+    "landed": 0,
+    "departed": 0,
+    "near_misses": 0,
+    "failed": false,
+    "failure_reason": null,
+    "duration_seconds": 227.236823
+  },
+  {
+    "datetime": "2025-11-28T17:53:58.575245",
+    "landed": 0,
+    "departed": 0,
+    "near_misses": 6,
+    "failed": true,
+    "failure_reason": "COLLISION: SWA1938 and DAL3319",
+    "duration_seconds": 149.031102
+  },
+  {
+    "datetime": "2025-11-28T17:54:09.339780",
+    "landed": 0,
+    "departed": 0,
+    "near_misses": 6,
+    "failed": true,
+    "failure_reason": "COLLISION: SWA1938 and DAL3319",
+    "duration_seconds": 159.795637
+  },
+  {
+    "datetime": "2025-11-28T17:54:10.872682",
+    "landed": 0,
+    "departed": 0,
+    "near_misses": 0,
+    "failed": false,
+    "failure_reason": null,
+    "duration_seconds": 1.532687
+  }
+]

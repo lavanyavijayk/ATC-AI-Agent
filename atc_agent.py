@@ -21,93 +21,17 @@ import google.generativeai as genai
 from langgraph.graph import StateGraph, END
 
 from utils.weather_data import WeatherInfo
-from flight import Airport, Runway, Flight
+from airport.airport import Airport
+from airport.runway import Runway
+from airport.flight import Flight
 from database.atc_db import ATCDatabase
-from config import GEMINI_API_KEY
-# ============================================================================
-# Configuration
-# ============================================================================
-
-# Configure Google Gemini API key from environment variable
-
-genai.configure(api_key=GEMINI_API_KEY)
+from utils.llm import LLM
+from prompts.landing_prompt import LANDING_PROMPT
+from prompts.take_off_prompt import TAKE_OFF_PROMPT
 
 # API Base URL for the ATC Simulator
 API_BASE_URL = "http://localhost:8000/api"
 
-
-# ============================================================================
-# LLM Wrapper Class
-# ============================================================================
-
-class LLM:
-    """
-    Wrapper class for Google's Gemini Language Model.
-    
-    Provides a simple interface to invoke the Gemini model with
-    configured generation parameters for ATC decision-making.
-    Includes automatic retry logic with configurable delays.
-    """
-    
-    # Retry configuration
-    MAX_RETRIES = 3
-    RETRY_DELAY_SECONDS = 60  # 1 minute between retries
-    
-    def __init__(self):
-        """Initialize the LLM wrapper."""
-        self.model_name = 'gemini-2.5-flash'
-        print(f"[LLM] Initialized with model: {self.model_name}")
-        print(f"[LLM] Retry config: max_retries={self.MAX_RETRIES}, delay={self.RETRY_DELAY_SECONDS}s")
-
-    def invoke(self, prompt: str) -> str:
-        """
-        Send a prompt to the Gemini model and get a response.
-        
-        Implements retry logic with 1-minute delay between attempts
-        in case of API failures or rate limiting.
-        
-        Args:
-            prompt: The text prompt to send to the model
-            
-        Returns:
-            The model's response text, or None if all retries failed
-        """
-        last_error = None
-        
-        for attempt in range(1, self.MAX_RETRIES + 1):
-            try:
-                print(f"[LLM] Invoking Gemini model (attempt {attempt}/{self.MAX_RETRIES})...")
-                model = genai.GenerativeModel(self.model_name)
-                
-                response = model.generate_content(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=0.1,  # Low temperature for consistent, deterministic outputs
-                        top_p=0.95,
-                    )
-                )
-                
-                # Check if we got a valid response
-                if response and response.text:
-                    response_preview = response.text[:200] if len(response.text) > 200 else response.text
-                    print(f"[LLM] Response received: {response_preview}...")
-                    return response.text
-                else:
-                    print(f"[LLM] WARNING: Empty response received on attempt {attempt}")
-                    last_error = "Empty response from model"
-                
-            except Exception as e:
-                last_error = str(e)
-                print(f"[LLM] ERROR on attempt {attempt}: {e}")
-            
-            # If this wasn't the last attempt, wait before retrying
-            if attempt < self.MAX_RETRIES:
-                print(f"[LLM] Waiting {self.RETRY_DELAY_SECONDS} seconds before retry...")
-                time.sleep(self.RETRY_DELAY_SECONDS)
-        
-        # All retries exhausted
-        print(f"[LLM] FAILED: All {self.MAX_RETRIES} attempts exhausted. Last error: {last_error}")
-        return None
 
 # ============================================================================
 # State Definition
@@ -417,7 +341,7 @@ class ATCAgent:
         
         # Load previous conversation history from database
         print("[ENTRY] Loading previous conversation history...")
-        state["prev_convo"] = ATCDatabase().get_records(state['flight_id'], 30)
+        state["prev_convo"] = ATCDatabase().get_records(state['flight_id'], 5)
         print(f"[ENTRY] Loaded {len(state['prev_convo'])} previous records")
         
         return state
@@ -477,268 +401,14 @@ class ATCAgent:
         waypoints = self._get_waypoints()
         
         print(f"[LANDING] Context gathered - {len(other_flights)} other flights in airspace")
-        landing_prompt = f"""
-            You are an expert Air Traffic Controller for Runway 34. Your objective is to safely sequence flight {callsign} through the traffic pattern.
-            You operate as a rigid state machine: Input State -> Logic Check -> Single Output Command.
-
-            ### PART 1: LIVE CONTEXT DATA
-            <telemetry>
-            {json.dumps(state['flight_info'], indent=2)}
-            </telemetry>
-
-            <environment>
-            **Waypoints:** {waypoints}
-            **Weather:** {weather_info}
-            **Runway:** {runway_details}
-            **Traffic:** {other_flights}
-            </environment>
-
-            <history>
-            {json.dumps(state['messages'], indent=2)}
-            </history>
-
-            ### PART 2: THE "GOLDEN PATH" LOGIC
-            You must move the aircraft through these states in order. NEVER skip a state.
-
-            1. **ENTRY** (North, East, West) -> **DOWNWIND**
-            * *CRITICAL EXCEPTION:* If at **SOUTH**, you MUST route to **EAST** first. (Direct South->Downwind cuts through the Base->Final landing path).
-            2. **DOWNWIND** -> **BASE**
-            3. **BASE** -> **FINAL**
-            4. **FINAL** -> **LAND** (Only if cleared)
-
-            **Safety Interrupts:**
-            * If separation < 3nm: Hold at current leg or vector to SHORT_EAST.
-            * If Go-Around needed: Vector from FINAL -> SHORT_EAST.
-
-            ### PART 3: REFERENCE EXAMPLES (Pattern Matching)
-            Use these examples to guide your decision-making.
-
-            **Example 1: Standard Progression**
-            *Input:* Plane at DOWNWIND, no traffic conflicts.
-            *Reasoning:* Next state is BASE. Path is clear.
-            *Output:* {{"waypoint": "BASE", "altitude": 1500, "speed": 140}}
-
-            **Example 2: The "South" Rule (Critical)**
-            *Input:* Plane enters at SOUTH.
-            *Reasoning:* Cannot go to DOWNWIND directly (unsafe). Must sequence via EAST.
-            *Output:* {{"waypoint": "EAST", "altitude": 3000, "speed": 160}}
-
-            **Example 3: Landing Clearance**
-            *Input:* Plane on FINAL, alt 1000ft, runway clear.
-            *Reasoning:* All criteria met for landing.
-            *Output:* {{"clear_to_land": true}}
-
-            ### PART 4: EXECUTION
-            Based on the <telemetry> and <environment>, determine the next step in the "Golden Path".
-            Return ONLY the JSON object.
-
-            **Format A (Vector):**
-            {{"waypoint": "NAME", "altitude": INT, "speed": INT}}
-
-            **Format B (Clearance):**
-            {{"clear_to_land": true}}
-            """
-        # Construct the landing prompt for LLM
-        # landing_prompt = f"""You are an experienced Air Traffic Controller at a busy airport, responsible for the safe and efficient landing of flight {callsign}. Your primary duties are to sequence aircraft, maintain safe separation, and guide them through the MANDATORY standard landing pattern to Runway 34.
-
-        # ## ROLE AND RESPONSIBILITIES
-        # As an Air Traffic Controller, you must:
-        # - Maintain safe separation between all aircraft (minimum 3 nautical miles horizontal OR 1000 feet vertical)
-        # - Sequence aircraft efficiently for landing on Runway 34
-        # - Issue clear, precise vectoring instructions
-        # - Monitor weather conditions and adjust procedures accordingly
-        # - Ensure compliance with all landing rules and regulations
-        # - Follow the MANDATORY landing sequence: DOWNWIND → BASE → FINAL → LAND
-
-        # ## CURRENT FLIGHT INFORMATION
-        # Flight Details:
-        # {json.dumps(state['flight_info'], indent=2)}
-
-        # Recent Communication History:
-        # {json.dumps(state['messages'], indent=2)}
-
-        # Previous 30 Minutes Context:
-        # {json.dumps(state['prev_convo'], indent=2)}
-
-        # ## AIRSPACE STRUCTURE AND WAYPOINTS
-
-        # ### Initial Entry Points (Altitude: 6000 feet)
-        # **These are the INITIAL ENTRY POINTS where aircraft first enter the airspace:**
-        # - NORTH
-        # - EAST  
-        # - SOUTH
-        # - WEST
-
-        # ### All Available Waypoints in the Pattern:
-        # {waypoints}
-
-        # **Note:** There are multiple waypoints available in the airspace. Choose the appropriate waypoint based on:
-        # - Aircraft's current position
-        # - Aircraft's current heading
-        # - Safety and collision avoidance
-        # - Maintaining the circular traffic pattern flow
-
-        # ## MANDATORY LANDING SEQUENCE
-
-        # **Every aircraft's ultimate goal is to land via this MANDATORY sequence:**
-
-        # 1. **[Appropriate Waypoint Routing]** → 
-        # 2. **DOWNWIND** (Mandatory checkpoint) → 
-        # 3. **BASE** (Mandatory checkpoint) → 
-        # 4. **FINAL** (Mandatory checkpoint) → 
-        # 5. **CLEARED TO LAND** (Runway)
-
-        # **CRITICAL RULES:**
-        # - Aircraft can NEVER skip DOWNWIND, BASE, or FINAL
-        # - Aircraft can NEVER go backwards in the sequence (e.g., FINAL → BASE → DOWNWIND)
-        # - The traffic pattern follows a CIRCULAR FLOW to prevent collisions
-        # - Aircraft must be routed to maintain this circular flow and avoid cutting through active approach paths
-
-        # ## STANDARD LANDING ROUTES
-
-        # Examples showing proper circular flow to DOWNWIND, then through the mandatory sequence:
-
-        # 1. **NORTH → DOWNWIND** → BASE → FINAL → RUNWAY
-        # 2. **EAST → DOWNWIND** → BASE → FINAL → RUNWAY
-        # 3. **SOUTH → EAST → DOWNWIND** → BASE → FINAL → RUNWAY (NEVER route directly to DOWNWIND - this cuts through BASE→FINAL path!)
-        # 4. **WEST → DOWNWIND** → BASE → FINAL → RUNWAY
-        # 5. **SHORT_EAST → DOWNWIND** → BASE → FINAL → RUNWAY
-
-        # **Special Routing Considerations:**
-        # - **From SOUTH**: Route via intermediate waypoints (e.g., SHORT_EAST or EAST) before DOWNWIND to maintain circular flow and avoid cutting through the BASE→FINAL corridor
-        # - **SHORT_EAST**: Preferred for aircraft needing to go around from FINAL or for sequencing/delaying before DOWNWIND
-
-        # ## LANDING RULES AND PROCEDURES
-        # {landing_rules}
-
-        # ## CURRENT WEATHER CONDITIONS
-        # {weather_info}
-
-        # ## TRAFFIC INFORMATION
-        # Other Aircraft in the Pattern:
-        # {other_flights}
-
-        # ## RUNWAY INFORMATION
-        # {runway_details}
-
-        # **Critical Note**: There is only ONE runway. Aircraft can only land from ONE direction (Runway 34, landing from south to north).
-
-        # ## TIMING ASSUMPTIONS FOR SEPARATION
-
-        # - **Aircraft cleared for landing on FINAL**: Approximately 9 minutes to touchdown and runway exit
-        # - **Aircraft vacating runway after landing**: Approximately 1 minute to clear the active runway
-        # - **Departing aircraft**: Will proceed directly to NORTH waypoint after takeoff
-
-        # ## DECISION-MAKING PROCESS (Chain of Thought)
-
-        # For each command, work through these steps systematically:
-
-        # ### Step 1: IDENTIFY CURRENT POSITION IN SEQUENCE
-        # - Where is the aircraft currently? (Entry point, DOWNWIND, BASE, FINAL, or other)
-        # - What is the NEXT required waypoint in the mandatory sequence?
-        # - Check aircraft's current heading - which direction is it flying?
-
-        # **Position-to-Next-Waypoint Logic:**
-        # - **At WAYPoint (NORTH/EAST/SOUTH/WEST/SHORT_EAST/.....)** → Next: **DOWNWIND**
-        # - **At DOWNWIND** → Next: **BASE**
-        # - **At BASE** → Next: **FINAL**
-        # - **At FINAL** → Next: **CLEAR TO LAND** (if criteria met)
-
-        # ### Step 2: SAFETY AND SEPARATION CHECK
-        # - Are there traffic conflicts with the next waypoint?
-        # - Is there adequate separation (3nm horizontal OR 1000ft vertical)?
-        # - Are there aircraft on FINAL or landing that would cause conflicts?
-        # - Are there departing aircraft that might conflict?
-        # - **CRITICAL**: Will the route to the next waypoint cut through any active approach paths (especially BASE→FINAL corridor)?
-
-        # **If SAFETY CHECK FAILS or COLLISION CONCERNS arise:**
-
-        # The redirection waypoint depends on WHERE the aircraft currently is:
-
-        # - **At FINAL**: Redirect to **SHORT_EAST** (preferred for go-arounds from FINAL)
-        # - **At BASE**: Redirect to closest waypoint that maintains circular flow (consider current heading and position)
-        # - **At DOWNWIND**: Redirect to closest waypoint that maintains circular flow (consider current heading and position)
-        # - **At SOUTH or southern positions**: **NEVER redirect directly to DOWNWIND** - this would cut through the BASE→FINAL corridor. Route via SHORT_EAST, EAST, or other intermediate waypoints first
-        # - **From any position**: Choose the closest waypoint that:
-        # * Maintains the circular traffic pattern
-        # * Avoids cutting through the BASE→FINAL approach path
-        # * Considers aircraft's current heading and direction
-        # * Provides adequate separation from other traffic
-
-        # **After redirection, aircraft must route back to DOWNWIND to restart the mandatory sequence.**
-
-        # ### Step 3: EVALUATE IF PROCEEDING TO NEXT WAYPOINT IS SAFE
-        # **Can the aircraft proceed to the next mandatory waypoint?**
-
-        # - **If YES and no conflicts:**
-        # - Issue vector to next waypoint in sequence
-        # - Set appropriate altitude and speed
-        # - Verify the route maintains circular flow
-
-        # - **If NO due to traffic/separation/collision concerns:**
-        # - **Critical consideration**: Where is the aircraft currently located?
-        # - Select redirection waypoint based on current position:
-        #     * **From FINAL**: Redirect to SHORT_EAST (preferred for go-arounds)
-        #     * **From BASE**: Choose closest waypoint considering heading, but maintain circular flow
-        #     * **From DOWNWIND**: Choose closest waypoint considering heading, but maintain circular flow  
-        #     * **From SOUTH or southern positions**: Route via SHORT_EAST, EAST, or other intermediate waypoints - NEVER direct to DOWNWIND as this cuts through BASE→FINAL path
-        # - **ALWAYS verify**: The redirection path does NOT cut through the BASE→FINAL corridor
-        # - **ALWAYS verify**: The path maintains the circular traffic pattern
-        # - After reaching redirection waypoint, route aircraft back to DOWNWIND to restart mandatory sequence
-
-        # ### Step 4: CHECK LANDING CLEARANCE CRITERIA (Only if at FINAL)
-        # **Can you clear the aircraft to land? Only if ALL conditions are met:**
-        # - Aircraft is established on FINAL approach
-        # - Aircraft is at or descending to 1000 feet
-        # - Aircraft speed is approximately 100 knots
-        # - Runway is clear (no aircraft landing or departing)
-        # - No traffic conflicts exist
-        # - Weather is within landing minimums
-        # - All previous waypoints (DOWNWIND, BASE) were completed
-
-        # ### Step 5: FORMULATE COMMAND
-        # Based on your analysis, issue ONE command:
-
-        # ## OUTPUT FORMATS
-
-        # Your response must be ONLY a valid JSON object in ONE of these two formats:
-
-        # ### Format 1: Vector to Waypoint
-        # Use when directing aircraft to the next waypoint in sequence or for re-sequencing:
-        # ```json
-        # {{"waypoint": "WAYPOINT_NAME", "altitude": TARGET_ALT, "speed": TARGET_SPEED}}
-        # ```
-
-        # **Examples:**
-        # - At NORTH entry point, no conflicts: `{{"waypoint": "DOWNWIND", "altitude": 2000, "speed": 150}}`
-        # - At DOWNWIND, no conflicts: `{{"waypoint": "BASE", "altitude": 1500, "speed": 140}}`
-        # - At BASE, no conflicts: `{{"waypoint": "FINAL", "altitude": 1000, "speed": 120}}`
-        # - At BASE, traffic conflict, heading east: `{{"waypoint": "EAST", "altitude": 3000, "speed": 160}}`
-
-        # ### Format 2: Landing Clearance
-        # Use ONLY when aircraft is at FINAL and all landing criteria are satisfied:
-        # ```json
-        # {{"clear_to_land": true}}
-        # ```
-
-        # ## CRITICAL INSTRUCTIONS
-
-        # 1. **NEVER skip waypoints** - every aircraft must pass through DOWNWIND → BASE → FINAL in order to land
-        # 2. **NEVER reverse sequence** - aircraft cannot go FINAL → BASE or BASE → DOWNWIND
-        # 3. **ALWAYS maintain circular flow** - choose waypoints that keep the traffic pattern flowing in a circular direction
-        # 4. **NEVER route through active approach paths** - especially avoid cutting through the BASE→FINAL corridor
-        # 5. **From SOUTH: NEVER direct to DOWNWIND** - always route via intermediate waypoints (SHORT_EAST, EAST) to avoid crossing BASE→FINAL path
-        # 6. **From FINAL: Prefer SHORT_EAST for go-arounds** - this is the standard missed approach waypoint
-        # 7. **Think step-by-step** through the decision process outlined above
-        # 8. **Prioritize safety** - when in doubt, redirect to appropriate waypoint maintaining circular flow
-        # 9. **Consider aircraft heading** - when selecting waypoints, factor in the direction aircraft is flying
-        # 10. **Issue one command at a time** - aircraft will acknowledge and comply
-        # 11. **Output ONLY JSON** - no explanations, no additional text, just the JSON object
-
-        # Provide the next appropriate ATC command in the specified JSON format.
-
-        # Response (JSON only):
-        # """
+        landing_prompt = LANDING_PROMPT.format(callsign=callsign,
+                                               waypoints=waypoints,
+                                               weather_info=weather_info,
+                                               runway_details=runway_details,
+                                               other_flights=other_flights,
+                                               landing_rules=landing_rules,
+                                               messages=json.dumps(state['messages'], indent=2),
+                                               flight_info=json.dumps(state['flight_info'], indent=2))
 
         # Invoke LLM and process response
         state["messages"].append({"role": "user", "content": landing_prompt})
@@ -790,88 +460,13 @@ class ATCAgent:
         print(f"[TAKEOFF] Context gathered - {len(other_flights)} other flights in airspace")
 
         # Construct the takeoff prompt for LLM
-        takeoff_prompt = f"""You are an experienced Air Traffic Controller at a busy airport, responsible for the safe departure clearance of flight {callsign}. Your primary duty is to ensure the runway is clear and safe before authorizing takeoff.
-
-        ## ROLE AND RESPONSIBILITIES
-        As an Air Traffic Controller managing departures, you must:
-        - Verify runway availability and safety before issuing takeoff clearance
-        - Monitor all aircraft in critical phases of flight (landing and takeoff)
-        - Maintain runway separation between departing and arriving aircraft
-        - Ensure no conflicts exist with aircraft on final approach or on the runway
-        - Issue clear, unambiguous clearance decisions
-
-        ## CURRENT FLIGHT INFORMATION
-        Flight Requesting Takeoff:
-        {json.dumps(state['flight_info'], indent=2)}
-
-        Recent Communication History:
-        {json.dumps(state['messages'], indent=2)}
-
-        Previous 30 Minutes Context:
-        {json.dumps(state['prev_convo'], indent=2)}
-
-        ## DEPARTURE PROCEDURES
-
-        ### Standard Departure Route
-        **ALL departing aircraft follow this route:**
-        - Takeoff from Runway 34
-        - Climb straight out
-        - Proceed directly to NORTH waypoint at (0, 25)
-        - Maintain departure altitude as assigned (typically 6000 feet)
-
-        ### NORTH Waypoint Details
-        {waypoints.get('NORTH', 'N/A')}
-
-        ## RUNWAY INFORMATION
-        {runway_details}
-
-        **Critical**: There is only ONE runway. Aircraft landing and taking off share the same runway surface.
-
-        ## TRAFFIC INFORMATION
-        Current Aircraft in the Pattern:
-        {other_flights}
-
-        ## WEATHER CONDITIONS
-        {weather_info}
-
-        ## CLEARANCE DECISION LOGIC
-
-        You must analyze the traffic and determine if it is safe to clear this aircraft for takeoff.
-
-        **Step 1: Check for Runway Conflicts**
-        Scan all aircraft in the pattern. The runway is NOT CLEAR if ANY aircraft meets these criteria:
-
-        1. **Aircraft occupying runway**: 
-        - `passed_waypoints` list ends with "RUNWAY"
-        
-        2. **Aircraft currently taking off**:
-        - `status` == "taking_off"
-        
-        3. **Aircraft currently landing**:
-        - `status` == "landing"
-        
-        4. **Aircraft on short final (imminent landing)**:
-        - `passed_waypoints` list ends with "FINAL" AND
-        - `target_waypoint` == "RUNWAY"
-
-        **Step 2: Make Decision**
-        - If ANY aircraft meets the above criteria → DENY takeoff clearance
-        - If NO aircraft meets the above criteria → GRANT takeoff clearance
-
-        ## OUTPUT FORMAT
-
-        Provide ONLY a JSON object with no explanation:
-
-        **Clearance Granted:**
-        ```json
-        {{"cleared_for_takeoff": true}}
-        ```
-
-        **Clearance Denied:**
-        ```json
-        {{"cleared_for_takeoff": false}}
-        ```
-        """
+        takeoff_prompt = TAKE_OFF_PROMPT.format(callsign=callsign,
+                                               waypoints=waypoints,
+                                               weather_info=weather_info,
+                                               runway_details=runway_details,
+                                               other_flights=other_flights,
+                                               messages=json.dumps(state['messages'], indent=2),
+                                               flight_info=json.dumps(state['flight_info'], indent=2))
 
         # Invoke LLM and process response
         state["messages"].append({"role": "user", "content": takeoff_prompt})
@@ -1066,7 +661,7 @@ class ATCAgent:
         # Only check against non-landing flights
         print("[SAFETY] Performing collision detection for en-route aircraft...")
         
-        from collision_detection import predict_conflict
+        from airport.saftey_checks import predict_conflict
         
         for flight in flights:
             flight_status = flight.get("status", "")
@@ -1211,5 +806,13 @@ def main(flight_info: dict, airport: Airport) -> None:
             print(f"[MAIN] Simulator response: {response.status_code}")
         except Exception as e:
             print(f"[MAIN] ERROR sending command: {e}")
+        db = ATCDatabase()
+        db.insert_record(
+            command=command,
+            result=result,
+            flight_id=flight_id,
+            flight_info=flight_info,
+            retry_count=result.get("retry_count", 0)
+        )
     else:
         print(f"[MAIN] No command generated for flight {flight_id}")

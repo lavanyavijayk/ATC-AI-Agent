@@ -44,6 +44,7 @@ class ATCDatabase:
             flight_id TEXT,
             flight_info TEXT,
             retry_count INTEGER,
+            messages TEXT,
             created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
@@ -60,11 +61,12 @@ class ATCDatabase:
         result: Dict[str, Any],
         flight_id: str,
         flight_info: Dict[str, Any],
-        retry_count: int = 0) -> int:
+        retry_count: int = 0,
+        messages: Optional[List[Any]] = None) -> int:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute(f""" INSERT INTO {TABLE_NAME} (command, result, flight_id, flight_info, retry_count)
-            VALUES (?, ?, ?, ?, ?)""", (json.dumps(command),json.dumps(result),flight_id,json.dumps(flight_info),retry_count))
+        cursor.execute(f""" INSERT INTO {TABLE_NAME} (command, result, flight_id, flight_info, retry_count, messages)
+            VALUES (?, ?, ?, ?, ?, ?)""", (json.dumps(command),json.dumps(result),flight_id,json.dumps(flight_info),retry_count,json.dumps(messages or [])))
         conn.commit()
         last_id = cursor.lastrowid
         conn.close()
@@ -109,7 +111,8 @@ class ATCDatabase:
                 "flight_id": row[3],
                 "flight_info": json.loads(row[4]),
                 "retry_count": row[5],
-                "created_time": row[6]
+                "messages": json.loads(row[6]) if row[6] else [],
+                "created_time": row[7]
             })
         return results
 
@@ -143,7 +146,8 @@ if __name__ == "__main__":
         result={"status": "ok"},
         flight_id="AI204",
         flight_info={"type": "A320", "origin": "DEL", "destination": "MAA"},
-        retry_count=0
+        retry_count=0,
+        messages=["Descend to 3000 feet", "Acknowledged"]
     )
 
     print(f"Inserted record with ID: {new_id}")
@@ -155,3 +159,5 @@ if __name__ == "__main__":
     # Fetch by flight_id
     ai_data = db.get_records(flight_id="AI204")
     print("AI204 Records:", ai_data)
+
+

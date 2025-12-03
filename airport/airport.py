@@ -1,218 +1,199 @@
-# # class AirPortContols:
-# #     def __init__(self):
-# #         pass
+"""
+Airport Module
+==============
+Manages airport operations including runway allocation and flight scheduling.
 
-# #     def landing():
-# #         pass
+This module provides the Airport class which serves as the central coordinator
+for managing runways and scheduling flights for landing, takeoff, and emergency
+operations.
+"""
 
-# #     def take_off():
-# #         pass
+import time
+from typing import Optional, List
 
-# class AirportFloorPlan(metaclass=SingletonMeta):
-#     """
-#     Singleton that models the airport floor plan and performs runway allocation.
-#     """
+from airport.runway import Runway, RunwayStatus
+from airport.scheduler import FlightScheduler, SlotInfo
+from airport.flight import Flight, FlightStatus
 
-#     # VERY_NEGATIVE used as score for emergencies
-#     VERY_NEGATIVE = -10**18
 
-#     def __init__(self, airport_code: str):
-#         self.airport_code = airport_code
-#         self.runways: Dict[str, Runway] = {}
-#         self.lock = threading.RLock()
-#         # priority heap: elements are (score, arrival_seq, Request)
-#         self._pq: List[Tuple[int, int, Request]] = []
-#         self._seq = itertools.count(start=1)
-#         # mapping request_id -> tuple(score, seq, Request) for quick updates (optional)
-#         self._pending_map: Dict[str, Tuple[int, int, Request]] = {}
-#         # separation rules (predecessor_wake, follower_wake) -> seconds
-#         # default example values (configurable)
-#         self.separation_rules: Dict[Tuple[str, str], int] = {
-#             ('HEAVY', 'HEAVY'): 120,
-#             ('HEAVY', 'MEDIUM'): 120,
-#             ('HEAVY', 'LIGHT'): 120,
-#             ('MEDIUM', 'HEAVY'): 90,
-#             ('MEDIUM', 'MEDIUM'): 90,
-#             ('MEDIUM', 'LIGHT'): 60,
-#             ('LIGHT', 'HEAVY'): 60,
-#             ('LIGHT', 'MEDIUM'): 60,
-#             ('LIGHT', 'LIGHT'): 60,
-#         }
-#         # assignments active
-#         self.assignments: Dict[str, Assignment] = {}
+class Airport:
+    """
+    Represents an airport with runways and flight scheduling capabilities.
+    
+    The Airport class manages:
+    - Multiple runways and their availability
+    - Flight scheduling for landings, takeoffs, and emergencies
+    - Runway assignment based on priority queues
+    
+    Attributes:
+        airport_code (str): ICAO/IATA airport identifier (e.g., 'JFK').
+        airport_name (str): Full name of the airport.
+        runways (List[Runway]): List of runways available at the airport.
+        flight_scheduler (FlightScheduler): Scheduler managing flight priorities.
+    
+    Example:
+        >>> airport = Airport("JFK", "John F. Kennedy International Airport")
+        >>> runway = Runway("R1", "3R", "030")
+        >>> airport.add_runway(runway)
+    """
+    
+    def __init__(self, airport_code: str, airport_name: str) -> None:
+        """
+        Initialize an Airport instance.
+        
+        Args:
+            airport_code: ICAO/IATA airport identifier.
+            airport_name: Full name of the airport.
+        """
+        self.airport_code = airport_code
+        self.airport_name = airport_name
+        self.runways: List[Runway] = []
+        self.flight_scheduler = FlightScheduler()
+    
+    def add_runway(self, runway: Runway) -> None:
+        """
+        Add a runway to the airport.
+        
+        Args:
+            runway: Runway instance to add to the airport.
+        """
+        self.runways.append(runway)
+    
+    def get_available_runway(self) -> Optional[Runway]:
+        """
+        Find and return an available runway for operations.
+        
+        Iterates through all runways and returns the first one
+        with AVAILABLE status.
+        
+        Returns:
+            An available Runway instance, or None if all runways are occupied.
+        """
+        for runway in self.runways:
+            if runway.status == RunwayStatus.AVAILABLE:
+                return runway
+        return None
+    
+    def schedule_landing(self, flight: Flight, landing_time: int, duration: int) -> None:
+        """
+        Schedule a flight for landing.
+        
+        Creates a time slot and adds the flight to the landing queue
+        with priority based on landing time.
+        
+        Args:
+            flight: Flight instance to schedule for landing.
+            landing_time: Unix timestamp for scheduled landing.
+            duration: Duration in seconds for the landing operation.
+        """
+        slot_info = SlotInfo(landing_time, landing_time + duration)
+        self.flight_scheduler.add_landing(flight, landing_time, slot_info)
+    
+    def schedule_takeoff(self, flight: Flight, takeoff_time: int, duration: int) -> None:
+        """
+        Schedule a flight for takeoff.
+        
+        Creates a time slot and adds the flight to the takeoff queue
+        with priority based on takeoff time.
+        
+        Args:
+            flight: Flight instance to schedule for takeoff.
+            takeoff_time: Unix timestamp for scheduled takeoff.
+            duration: Duration in seconds for the takeoff operation.
+        """
+        slot_info = SlotInfo(takeoff_time, takeoff_time + duration)
+        self.flight_scheduler.add_takeoff(flight, takeoff_time, slot_info)
+    
+    def schedule_mayday(self, flight: Flight, duration: int) -> None:
+        """
+        Schedule an emergency (MAYDAY) flight with highest priority.
+        
+        Emergency flights are scheduled immediately with the current time
+        and receive the highest priority in the queue.
+        
+        Args:
+            flight: Flight instance declaring emergency.
+            duration: Duration in seconds for the emergency operation.
+        """
+        current_time = int(time.time())
+        slot_info = SlotInfo(current_time, current_time + duration)
+        self.flight_scheduler.add_mayday(flight, slot_info)
+    
+    def process_next_flight(self) -> bool:
+        """
+        Process the next highest priority flight in the schedule.
+        
+        Retrieves the next flight from the scheduler, finds an available
+        runway, and assigns the flight to it.
+        
+        Returns:
+            True if flight was successfully assigned to a runway,
+            False if no flights pending or no runway available.
+        """
+        # Get next flight from priority queue
+        next_entry = self.flight_scheduler.get_next_flight()
+        if not next_entry:
+            return False
+        
+        # Find available runway
+        runway = self.get_available_runway()
+        if not runway:
+            print(f"[WARNING] No available runway for {next_entry.flight.flight_number}")
+            return False
+        
+        # Assign flight to runway
+        success = runway.assign_flight(
+            next_entry.flight,
+            next_entry.slot_info.start_time,
+            next_entry.slot_info.end_time
+        )
+        
+        if success:
+            operation = next_entry.used_for.value
+            print(f"[INFO] Assigned {next_entry.flight.flight_number} "
+                  f"to {runway.runway_id} for {operation}")
+        
+        return success
+    
+    def __repr__(self) -> str:
+        """Return string representation of the airport."""
+        return (
+            f"Airport({self.airport_code}, "
+            f"runways={len(self.runways)}, "
+            f"scheduled_flights={self.flight_scheduler.get_schedule_size()})"
+        )
 
-#     # ---- Runway management ----
-#     def add_runway(self, name: str, length_m: int, heading: float) -> str:
-#         with self.lock:
-#             rid = str(uuid.uuid4())
-#             rv = Runway(id=rid, name=name, length_m=length_m, heading=heading)
-#             self.runways[rid] = rv
-#             return rid
 
-#     def get_runways(self) -> List[Runway]:
-#         with self.lock:
-#             return list(self.runways.values())
-
-#     # ---- Priority queue handling ----
-#     def push_request(self, callsign: str, req_type: str, aircraft_wake: str,
-#                      eta_ms: Optional[int], mayday: bool=False, metadata: Optional[dict]=None) -> str:
-#         """
-#         Add a request to the priority queue.
-#         mayday: bool → if True priority_value is -1 (highest).
-#         Returns request_id.
-#         """
-#         with self.lock:
-#             rid = str(uuid.uuid4())
-#             priority_value = -1 if mayday else (eta_ms if eta_ms is not None else millis())
-#             # score mapping: MAYDAY -> VERY_NEGATIVE else use priority_value (ms)
-#             score = self.VERY_NEGATIVE if priority_value == -1 else priority_value
-#             seq = next(self._seq)
-#             req = Request(request_id=rid, callsign=callsign, req_type=req_type,
-#                           aircraft_wake=aircraft_wake, eta_ms=eta_ms,
-#                           priority_value=priority_value, metadata=metadata or {})
-#             heapq.heappush(self._pq, (score, seq, req))
-#             self._pending_map[rid] = (score, seq, req)
-#             return rid
-
-#     def mark_mayday(self, request_id: str):
-#         """
-#         Convert an existing pending request to MAYDAY (highest priority).
-#         If it's not pending, returns False.
-#         """
-#         with self.lock:
-#             entry = self._pending_map.get(request_id)
-#             if not entry:
-#                 return False
-#             _, _, req = entry
-#             # remove old entry lazily by marking and pushing a new one;
-#             # simplest approach: push new MAYDAY entry and mark old as invalid by deleting from map
-#             # but to avoid duplicates in pq we remove from map and push new
-#             del self._pending_map[request_id]
-#             # push new
-#             return self._push_mayday_existing(req)
-
-#     def _push_mayday_existing(self, req: Request):
-#         # reuse same request id
-#         req.priority_value = -1
-#         score = self.VERY_NEGATIVE
-#         seq = next(self._seq)
-#         with self.lock:
-#             heapq.heappush(self._pq, (score, seq, req))
-#             self._pending_map[req.request_id] = (score, seq, req)
-#         return True
-
-#     def _pop_pending(self) -> Optional[Request]:
-#         """
-#         Pop next pending request from heap, skipping stale/removed entries.
-#         """
-#         with self.lock:
-#             while self._pq:
-#                 score, seq, req = heapq.heappop(self._pq)
-#                 mapped = self._pending_map.get(req.request_id)
-#                 # check that this is the active entry for that request
-#                 if mapped and mapped[0] == score and mapped[1] == seq:
-#                     del self._pending_map[req.request_id]
-#                     return req
-#                 # otherwise it's stale; continue popping
-#             return None
-
-#     # ---- Allocation logic ----
-#     def allocate_next(self, now_ms: Optional[int] = None) -> Optional[Assignment]:
-#         """
-#         Pop the next request and allocate a runway for it based on separation rules.
-#         Returns Assignment or None if no pending requests or no feasible runway.
-#         """
-#         now_ms = now_ms or millis()
-#         with self.lock:
-#             # cleanup runway occupancy past now
-#             for r in self.runways.values():
-#                 r.release_past(now_ms)
-
-#             req = self._pop_pending()
-#             if not req:
-#                 return None
-
-#             # Evaluate each runway for earliest feasible assigned_time (ms)
-#             best_runway: Optional[Runway] = None
-#             best_assigned_time: Optional[int] = None
-#             for runway in self.runways.values():
-#                 if not runway.active:
-#                     continue
-#                 earliest_candidate = max(now_ms, req.eta_ms or now_ms)
-#                 # find next free time on runway >= earliest_candidate
-#                 runway_next_free = runway.next_free_time(earliest_candidate)
-#                 # find the last assignment on the runway to compute separation
-#                 # we approximate: separation applies relative to runway occupancy end last
-#                 last_end = runway_next_free  # runway_next_free already considers occupancy
-#                 # To compute separation seconds we need predecessor wake; find most recent occupancy predecessor wake
-#                 # For simplicity assume separation computed against last occupancy entry's associated aircraft
-#                 # -> We don't store predecessor wake per occupancy in this simplified model.
-#                 # Instead, apply a conservative max separation across all wake combos for safety:
-#                 max_sep_seconds = max(self.separation_rules.values()) if self.separation_rules else 60
-#                 candidate_time = last_end + max_sep_seconds * 1000
-#                 # allow immediate if runway_next_free == earliest_candidate (i.e., no active occupancy) then candidate_time is earliest + sep
-#                 # Choose assignment time that respects separation but minimize delay
-#                 if best_assigned_time is None or candidate_time < best_assigned_time:
-#                     best_assigned_time = candidate_time
-#                     best_runway = runway
-
-#             if best_runway is None or best_assigned_time is None:
-#                 # no runway available
-#                 return None
-
-#             # Reserve runway: decide occupancy window length: simple constant occupancy depending on type
-#             occupancy_seconds = 60 if req.req_type == 'TAKEOFF' else 90  # simple heuristic
-#             start_ms = best_assigned_time
-#             end_ms = start_ms + occupancy_seconds * 1000
-#             best_runway.reserve(start_ms, end_ms)
-
-#             # Create assignment
-#             assignment = Assignment(
-#                 assignment_id=str(uuid.uuid4()),
-#                 request_id=req.request_id,
-#                 runway_id=best_runway.id,
-#                 assigned_time_ms=start_ms,
-#                 clearance_type=('CLEARED_TO_LAND' if req.req_type == 'LAND' else 'CLEARED_TAKEOFF'),
-#                 created_at_ms=millis()
-#             )
-#             self.assignments[assignment.assignment_id] = assignment
-#             return assignment
-
-#     def release_assignment(self, assignment_id: str):
-#         """Release assignment (remove from active assignments). This does not remove occupancy history."""
-#         with self.lock:
-#             if assignment_id in self.assignments:
-#                 del self.assignments[assignment_id]
-#                 return True
-#             return False
-
-#     # ---- Observability / Helpers ----
-#     def peek_pending(self, limit: int = 10) -> List[Request]:
-#         """Return up to `limit` pending requests in priority order (destructive peek not performed)."""
-#         with self.lock:
-#             # Make a shallow copy of heap, pop up to limit, then discard
-#             tmp = list(self._pq)
-#             heapq.heapify(tmp)
-#             out = []
-#             while tmp and len(out) < limit:
-#                 score, seq, req = heapq.heappop(tmp)
-#                 mapped = self._pending_map.get(req.request_id)
-#                 if mapped and mapped[0] == score and mapped[1] == seq:
-#                     out.append(req)
-#             return out
-
-#     def status(self) -> dict:
-#         with self.lock:
-#             now = millis()
-#             runways = [{
-#                 'id': r.id, 'name': r.name, 'length_m': r.length_m, 'heading': r.heading,
-#                 'active': r.active, 'occupancy': r.occupancy
-#             } for r in self.runways.values()]
-#             pending_count = len(self._pending_map)
-#             return {
-#                 'airport_code': self.airport_code,
-#                 'now_ms': now,
-#                 'runways': runways,
-#                 'pending_requests': pending_count,
-#                 'active_assignments': len(self.assignments)
-#             }
+# =============================================================================
+# Example Usage / Module Testing
+# =============================================================================
+if __name__ == "__main__":
+    # Create airport instance
+    airport = Airport("JFK", "John F. Kennedy International Airport")
+    
+    # Add runway (runway_id, name, direction)
+    runway1 = Runway("R1", "3R", "030")
+    airport.add_runway(runway1)
+    print(f"Runway details: {airport.runways[0].get_runway_details()}")
+    
+    # Create sample flights
+    flight1 = Flight("F001", "AA101", "LAX", "JFK")      # Arrival from LA
+    flight2 = Flight("F002", "UA202", "ORD", "JFK")      # Arrival from Chicago
+    flight3 = Flight("F003", "DL303", "JFK", "MIA")      # Departure to Miami
+    emergency_flight = Flight("F004", "BA999", "LHR", "JFK")  # Emergency
+    
+    # Schedule flights with different priorities
+    airport.schedule_landing(flight1, 1000, 300)   # Landing at time 1000
+    airport.schedule_takeoff(flight3, 1100, 200)   # Takeoff at time 1100
+    airport.schedule_landing(flight2, 1050, 300)   # Landing at time 1050
+    airport.schedule_mayday(emergency_flight, 400) # Emergency - highest priority
+    
+    # Display airport status
+    print(f"\n{airport}")
+    print(f"Scheduled flights: {airport.flight_scheduler.get_schedule_size()}\n")
+    
+    # Process all flights in priority order
+    print("Processing flights in priority order:")
+    print("-" * 50)
+    while airport.flight_scheduler.get_schedule_size() > 0:
+        airport.process_next_flight()

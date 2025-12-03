@@ -1,7 +1,8 @@
 import requests
 import time
 from database.flights_db import FlightDatabase
-from flight import Airport, Runway
+from airport.airport import Airport
+from airport.runway import Runway
 from atc_agent import main
 
 db = FlightDatabase()
@@ -42,11 +43,13 @@ while True:
                     db.update_flight(db_data["id"], flight)
                 if flight['passed_waypoints'] and flight['passed_waypoints'][-1] == flight['target_waypoint']:
                     updated = True
+                else:
+                    updated = False
 
                 if flight["status"] in ["landing", "takeoff"]:
                     continue
 
-                if updated or (flight['flight_type']=="departure" and not flight['cleared_for_takeoff']):
+                if updated or (flight['flight_type']=="ready_for_takeoff" and not flight['cleared_for_takeoff']) or not flight['target_waypoint']:
                     main(flight, airport)
 
         else:

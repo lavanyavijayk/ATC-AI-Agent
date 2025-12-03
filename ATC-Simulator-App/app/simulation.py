@@ -329,15 +329,14 @@ class Flight:
     def _check_waypoint_passage(self) -> None:
         """Check if we've passed any waypoints."""
         for name, waypoint in WAYPOINTS.items():
-            if name in self.passed_waypoints:
-                continue
-            
             dx = waypoint.position.x - self.position.x
             dy = waypoint.position.y - self.position.y
             distance = math.sqrt(dx**2 + dy**2)
             
             if distance < 0.5:
-                self.passed_waypoints.append(name)
+                # Only append if different from the last waypoint (avoid consecutive duplicates)
+                if not self.passed_waypoints or self.passed_waypoints[-1] != name:
+                    self.passed_waypoints.append(name)
                 if self.target_waypoint == name:
                     # Continue on current heading after passing waypoint
                     # (don't circle - just clear the waypoint target)

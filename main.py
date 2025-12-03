@@ -40,7 +40,7 @@ while True:
                         updated = True
 
                     db.update_flight(db_data["id"], flight)
-                if flight['passed_waypoints'][-1] == flight['target_waypoint']:
+                if flight['passed_waypoints'] and flight['passed_waypoints'][-1] == flight['target_waypoint']:
                     updated = True
 
                 if flight["status"] in ["landing", "takeoff"]:

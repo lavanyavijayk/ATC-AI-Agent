@@ -1,335 +1,270 @@
-# AI-ATC Simulator
+# 🛫 ATC AI Agent
 
-An online Air Traffic Control simulator designed for integration with agentic AI systems. Features real-time radar display, waypoint navigation, collision detection, and comprehensive REST API.
+An AI-powered Air Traffic Control system that uses Google Gemini LLM to manage aircraft landing and takeoff operations in a real-time flight simulator.
 
-![AI-ATC Simulator](https://img.shields.io/badge/version-3.0.0-22c55e?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.10+-blue?style=flat-square)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688?style=flat-square)
+![Gemini](https://img.shields.io/badge/Gemini-2.5--flash-orange?style=flat-square)
+![LangGraph](https://img.shields.io/badge/LangGraph-workflow-purple?style=flat-square)
 
-## Features
+## Overview
 
-- 🛫 **Realistic Flight Simulation** - Aircraft with physics (climb, descent, turns)
-- 🗺️ **Dark Radar Display** - Professional ATC-style interface
-- 📍 **Waypoint Navigation** - Direct-to routing with automatic waypoint passage
-- ✅ **Landing Rules** - Altitude, speed, and waypoint requirements for clearance
-- 💥 **Collision Detection** - Near miss warnings and collision failure
-- 📊 **Statistics Tracking** - Landed, departed, near misses counts
-- 🔌 **REST API** - Full API for AI agent integration
-- 🌐 **WebSocket Updates** - Real-time flight position updates (10 Hz)
-- ⏱️ **Speed Control** - 1x, 2x, 5x, 10x simulation speed
-- 📜 **Flight History** - Track completed arrivals and departures
+This project consists of two main components:
 
-## Quick Start
+1. **ATC Simulator** - A real-time flight simulation with radar display, waypoint navigation, and REST API
+2. **AI Agent** - An intelligent controller using LangGraph workflow and Gemini LLM for decision-making
+
+The AI agent continuously monitors the simulator, making real-time decisions to:
+- Guide arriving aircraft through the landing pattern (DOWNWIND → BASE → FINAL → LAND)
+- Clear departing aircraft for takeoff when runway is safe
+- Detect and prevent collisions through safety checks
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.10+
+- Google Gemini API key ([Get one here](https://makersuite.google.com/app/apikey))
 
 ### Installation
 
 ```bash
-cd /home/para/study/AI-ATC
-python -m venv venv
-source venv/bin/activate
+# Clone the repository
+git clone https://github.com/lavanyavijayk/ATC-AI-Agent
+cd ATC-AI-Agent
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# or: .venv\Scripts\activate  # Windows
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Configure API key
+cp .env.example .env
+# Edit .env and add your GEMINI_API_KEY
 ```
 
-### Running the Simulator
+### Running the System
 
+**Terminal 1 - Start the Simulator:**
 ```bash
+cd simulator-app
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open your browser to `http://localhost:8000`
-
-## Airport: KRNT (Renton Municipal)
-
-- **Single Runway:** 34 (Heading 340°)
-- **Elevation:** 32 ft
-
-## Waypoints
-
-| Waypoint | Position (nm) | Altitude | Description |
-|----------|---------------|----------|-------------|
-| NORTH | (0, 25) | 6000' | Departure exit / Entry point |
-| SOUTH | (0, -25) | 6000' | Entry point |
-| EAST | (25, 0) | 6000' | Entry point |
-| WEST | (-25, 0) | 6000' | Entry point |
-| DOWNWIND | (-9, 6) | 2000' | Downwind leg (west of runway) |
-| BASE | (-9, -12) | 1500' | Base turn point |
-| FINAL | (0, -15) | 1000' | Final approach (aligned with RWY 34) |
-| RUNWAY | (0, 0) | 32' | Runway threshold |
-
-**Traffic Pattern:** U-shaped - DOWNWIND → BASE → FINAL → RUNWAY
-
-## Landing Rules
-
-A flight must meet ALL criteria to be cleared for landing:
-
-| Rule | Requirement |
-|------|-------------|
-| Altitude | Below 1500 ft |
-| Speed | Between 100-180 kt |
-| Distance | Within 18 nm of runway |
-| Waypoint | Must have passed FINAL |
-| Heading | Within ±30° of runway heading (340°) |
-
-## Collision & Separation
-
-| Type | Distance | Altitude | Result |
-|------|----------|----------|--------|
-| **Near Miss** | < 1000 ft | Any | Warning + Counter |
-| **Collision** | < 500 ft | < 500 ft | Simulation Failure |
-
-## Departure Procedure
-
-1. Spawn departure → appears at gate
-2. After 60 seconds → status: `ready_for_takeoff`
-3. Clear for takeoff → auto-routes to **NORTH** at **6000ft**
-4. Reaches NORTH + 6000ft → `departed` (disappears)
-
-## API Reference
-
-### Base URL
-```
-http://localhost:8000/api
+**Terminal 2 - Start the AI Agent:**
+```bash
+cd agent
+python main.py
 ```
 
-### GET Endpoints
+**Browser:**
+Open http://localhost:8000 to view the radar display
 
-| Endpoint | Description |
-|----------|-------------|
-| `/api/airport` | Airport information |
-| `/api/waypoints` | All navigation waypoints |
-| `/api/landing-rules` | Landing clearance rules |
-| `/api/flights` | All active flights |
-| `/api/flights/landing` | Flights approaching for landing |
-| `/api/flights/takeoff` | Flights ready for takeoff |
-| `/api/flights/history` | Completed flights (landed/departed) |
-| `/api/flights/{callsign}` | Specific flight details |
-| `/api/simulation/status` | Simulation status and stats |
-| `/api/simulation/near-misses` | Active near miss alerts |
-| `/api/scores` | Saved score history |
+## 📁 Project Structure
 
-### POST Endpoints
+```
+ATC-AI-Agent/
+├── requirements.txt            # Python dependencies
+├── .env                        # API keys (create from .env.example)
+│
+├── agent/                      # AI Agent Module
+│   ├── main.py                 # Main entry point - runs the AI agent loop
+│   ├── config.py               # Configuration settings (loads .env)
+│   ├── atc_agent.py            # LangGraph workflow & ATCAgent class
+│   │
+│   ├── airport/                # Airport Domain Models
+│   │   ├── airport.py          # Airport class - runway management
+│   │   ├── flight.py           # Flight class - aircraft representation
+│   │   ├── runway.py           # Runway class - runway status & assignment
+│   │   ├── scheduler.py        # FlightScheduler - priority queue management
+│   │   └── saftey_checks.py    # Collision detection & conflict prediction
+│   │
+│   ├── database/               # Database Layer
+│   │   ├── atc_db.py           # ATC communication history (SQLite)
+│   │   └── flights_db.py       # Flight tracking database
+│   │
+│   ├── prompts/                # LLM Prompts
+│   │   ├── landing_prompt.py   # Prompt template for landing decisions
+│   │   └── take_off_prompt.py  # Prompt template for takeoff decisions
+│   │
+│   └── utils/                  # Utility Modules
+│       ├── llm.py              # Gemini LLM wrapper with retry logic
+│       ├── weather_data.py     # NOAA weather service integration
+│       ├── communication.py    # Communication utilities
+│       ├── common.py           # Common helper functions
+│       └── singleton.py        # Singleton pattern implementation
+│
+└── simulator-app/              # Flight Simulator
+    ├── app/
+    │   ├── main.py             # FastAPI application + WebSocket
+    │   ├── api.py              # REST API endpoints
+    │   ├── models.py           # Pydantic data models
+    │   └── simulation.py       # Flight physics engine
+    ├── static/
+    │   ├── index.html          # Radar display UI
+    │   ├── style.css           # Dark theme styling
+    │   └── app.js              # Frontend logic
+    └── README.md               # Detailed simulator docs
+```
 
-| Endpoint | Description |
-|----------|-------------|
-| `/api/flights/{callsign}/command` | Send command to flight |
-| `/api/simulation/spawn/arrival` | Spawn new arrival |
-| `/api/simulation/spawn/departure` | Spawn new departure |
-| `/api/simulation/speed` | Set speed multiplier |
-| `/api/simulation/restart` | Save score & restart |
-| `/api/simulation/end` | Save score & end |
+## 🎮 How It Works
+
+### AI Agent Workflow
+
+The agent uses LangGraph to implement a state machine workflow:
+
+```
+┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌─────┐
+│ Entry Point │ ──▶ │ Landing Node │ ──▶ │ Safety Check │ ──▶ │ End │
+└─────────────┘     │   or         │     └──────────────┘     └─────┘
+                    │ Takeoff Node │            │
+                    └──────────────┘            │ retry (max 3)
+                           ▲                    │
+                           └────────────────────┘
+```
+
+1. **Entry Point**: Load flight data and conversation history from SQLite database
+2. **Landing/Takeoff Node**: LLM generates appropriate command using contextual prompts
+3. **Safety Check**: Validate command for runway conflicts and collision risks
+4. **Retry or End**: Retry with safety context or send validated command to simulator
+
+### Main Loop (`agent/main.py`)
+
+The agent continuously polls the simulator API and processes flights:
+
+1. Fetch all landing flights from `/api/flights/landing/`
+2. Track flight state changes in local SQLite database
+3. Invoke the LangGraph workflow when:
+   - Flight passes a waypoint
+   - Flight is ready for takeoff and not cleared
+   - Flight has no target waypoint assigned
+4. Send validated commands back to simulator via REST API
+
+### Landing Pattern
+
+Aircraft must follow this sequence to land at KRNT (Renton Municipal):
+
+```
+                    NORTH (departure exit)
+                      │
+    WEST ─────────────┼─────────────── EAST
+                      │
+              ┌───────┴───────┐
+              │   DOWNWIND    │ (2000')
+              │       │       │
+              │       ▼       │
+              │     BASE      │ (1500')
+              │       │       │
+              │       ▼       │
+              │     FINAL     │ (1000')
+              │       │       │
+              │       ▼       │
+              │    RUNWAY     │ (Heading 340°)
+              └───────────────┘
+                    SOUTH
+```
+
+## 🔧 Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GEMINI_API_KEY` | Google Gemini API key | Required |
+
+### LLM Configuration (`agent/utils/llm.py`)
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| Model | `gemini-2.5-flash` | Fast, efficient model |
+| Temperature | `0.1` | Low for deterministic outputs |
+| Max Retries | `3` | Retry attempts on API failure |
+| Retry Delay | `60s` | Wait between retries |
+
+### Landing Rules
+
+| Rule | Value |
+|------|-------|
+| Max Altitude | 1500 ft |
+| Speed Range | 100-180 kt |
+| Max Distance | 18 nm |
+| Required Waypoint | FINAL |
+
+## 📡 API Reference
+
+### Simulator Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/flights` | All active flights |
+| GET | `/api/flights/landing` | Approaching flights |
+| GET | `/api/flights/takeoff` | Departing flights |
+| GET | `/api/flights/history` | Completed flights |
+| GET | `/api/waypoints` | Navigation waypoints |
+| GET | `/api/landing-rules` | Landing requirements |
+| POST | `/api/flights/{callsign}/command` | Send command |
+| POST | `/api/simulation/spawn/arrival` | Spawn arrival |
+| POST | `/api/simulation/spawn/departure` | Spawn departure |
 
 ### Flight Commands
 
-```http
-POST /api/flights/{callsign}/command
-Content-Type: application/json
-```
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| altitude | float | Target altitude in feet |
-| speed | float | Target speed in knots |
-| heading | float | Target heading in degrees (clears waypoint) |
-| waypoint | string | Direct to waypoint (e.g., "FINAL") |
-| clear_to_land | bool | Clear for landing (checks rules) |
-| clear_for_takeoff | bool | Clear for takeoff |
-
-**Note:** `heading` takes priority over `waypoint`. After passing a waypoint, flight continues on the same heading (no circling).
-
-### Examples
-
-**Direct to waypoint with altitude/speed:**
-```bash
-curl -X POST http://localhost:8000/api/flights/UAL123/command \
-  -H "Content-Type: application/json" \
-  -d '{"waypoint": "FINAL", "altitude": 1000, "speed": 140}'
-```
-
-**Set heading (instead of waypoint):**
-```bash
-curl -X POST http://localhost:8000/api/flights/UAL123/command \
-  -H "Content-Type: application/json" \
-  -d '{"heading": 340, "altitude": 1000}'
-```
-
-**Clear for landing:**
-```bash
-curl -X POST http://localhost:8000/api/flights/UAL123/command \
-  -H "Content-Type: application/json" \
-  -d '{"clear_to_land": true}'
-```
-
-**Set simulation speed:**
-```bash
-curl -X POST http://localhost:8000/api/simulation/speed \
-  -H "Content-Type: application/json" \
-  -d '{"multiplier": 5.0}'
-```
-
-### Response Format
-
-**Success:**
 ```json
-{
-  "status": "ok",
-  "callsign": "UAL123",
-  "command": {"waypoint": "FINAL", "altitude": 1000},
-  "result": {"success": true, "message": "Command accepted"}
-}
+// Vector to waypoint
+{"waypoint": "FINAL", "altitude": 1000, "speed": 140}
+
+// Clear to land
+{"clear_to_land": true}
+
+// Clear for takeoff
+{"cleared_for_takeoff": true}
 ```
 
-**Error (landing rules not met):**
-```json
-{
-  "status": "error",
-  "callsign": "UAL123",
-  "command": {"clear_to_land": true},
-  "result": {
-    "success": false,
-    "message": "Cannot clear to land: Altitude 2500ft exceeds max 1500ft"
-  }
-}
-```
+## 🛡️ Safety Features
 
-## AI Agent Integration
+The safety check node (`atc_agent.py`) validates all commands:
 
-```python
-import httpx
-import asyncio
+- **Takeoff Conflicts**: Blocks takeoff if any aircraft is on FINAL, RUNWAY, or actively landing/taking off
+- **Clear to Land Conflicts**: Blocks landing clearance if runway is occupied
+- **Pattern Conflicts**: Prevents two aircraft from targeting the same waypoint from the same position
+- **Collision Prediction**: Uses `saftey_checks.py` to predict conflicts 2 minutes ahead
+  - Horizontal threshold: 5 nm
+  - Vertical threshold: 1000 ft
 
-async def ai_atc_controller():
-    async with httpx.AsyncClient(base_url="http://localhost:8000/api") as client:
-        waypoints = (await client.get("/waypoints")).json()
-        rules = (await client.get("/landing-rules")).json()
-        
-        while True:
-            flights = (await client.get("/flights")).json()
-            
-            for flight in flights:
-                # Handle arrivals
-                if flight["flight_type"] == "arrival":
-                    if flight["status"] == "approaching":
-                        # Guide through pattern: DOWNWIND → BASE → FINAL
-                        if "DOWNWIND" not in flight["passed_waypoints"]:
-                            await client.post(
-                                f"/flights/{flight['callsign']}/command",
-                                json={"waypoint": "DOWNWIND", "altitude": 2000, "speed": 200}
-                            )
-                        elif "BASE" not in flight["passed_waypoints"]:
-                            await client.post(
-                                f"/flights/{flight['callsign']}/command",
-                                json={"waypoint": "BASE", "altitude": 1500, "speed": 160}
-                            )
-                        elif "FINAL" not in flight["passed_waypoints"]:
-                            await client.post(
-                                f"/flights/{flight['callsign']}/command",
-                                json={"waypoint": "FINAL", "altitude": 1000, "speed": 140}
-                            )
-                    
-                    elif flight["status"] == "on_final" and not flight["cleared_to_land"]:
-                        await client.post(
-                            f"/flights/{flight['callsign']}/command",
-                            json={"clear_to_land": True}
-                        )
-                
-                # Handle departures
-                elif flight["flight_type"] == "departure":
-                    if flight["status"] == "ready_for_takeoff" and not flight["cleared_for_takeoff"]:
-                        await client.post(
-                            f"/flights/{flight['callsign']}/command",
-                            json={"clear_for_takeoff": True}
-                        )
-            
-            await asyncio.sleep(1)
+## 📊 Waypoints
 
-asyncio.run(ai_atc_controller())
-```
+### Entry Points (6000')
+- NORTH, SOUTH, EAST, WEST, SHORT_EAST
 
-## WebSocket
+### Traffic Pattern
+- DOWNWIND (2000') → BASE (1500') → FINAL (1000') → RUNWAY
 
-Connect to `/ws` for real-time updates:
+### AI Sequencing Points
+- ALPHA, BRAVO (5000') - North sequencing
+- CHARLIE, DELTA (4000') - South sequencing  
+- ECHO (2500') - Extended final
+- HOTEL (3500') - Holding point
 
-```javascript
-const ws = new WebSocket('ws://localhost:8000/ws');
+## 🗄️ Database
 
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  // data.type === 'update'
-  // data.flights === [<FlightData>, ...]
-  // data.stats === {landed, departed, near_misses, failed, ...}
-  // data.near_misses === [{callsigns, position}, ...]
-  // data.history === {landed: [...], departed: [...]}
-};
+The agent uses SQLite databases stored locally:
 
-// Send commands via WebSocket
-ws.send(JSON.stringify({
-  type: 'command',
-  callsign: 'UAL123',
-  command: { altitude: 3000 }
-}));
+- **`atc.db`**: Stores ATC communication history
+  - Commands sent to flights
+  - LLM responses and retry counts
+  - Used for conversation context in prompts
 
-// Set speed
-ws.send(JSON.stringify({ type: 'set_speed', multiplier: 5.0 }));
+- **Flight tracking**: Monitors flight state changes to determine when to invoke the LLM
 
-// Restart simulation
-ws.send(JSON.stringify({ type: 'restart' }));
-```
+## 🤝 Contributing
 
-## Scoring
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
 
-Scores are saved to `scores.json` on:
-- Collision (automatic)
-- Restart button
-- End button
-
-Score format:
-```json
-{
-  "datetime": "2024-01-15T10:30:00",
-  "landed": 5,
-  "departed": 3,
-  "near_misses": 1,
-  "failed": false,
-  "failure_reason": null,
-  "duration_seconds": 300.5
-}
-```
-
-## Project Structure
-
-```
-AI-ATC/
-├── app/
-│   ├── __init__.py
-│   ├── main.py          # FastAPI application + WebSocket
-│   ├── api.py           # REST API endpoints
-│   ├── models.py        # Pydantic data models
-│   └── simulation.py    # Flight physics engine
-├── static/
-│   ├── index.html       # Radar display UI
-│   ├── style.css        # Dark theme styling
-│   └── app.js           # Frontend logic
-├── api_samples/         # API usage examples
-│   ├── *.sh             # Shell script examples
-│   ├── python_example.py
-│   └── README.md
-├── scores.json          # Saved scores
-├── requirements.txt
-└── README.md
-```
-
-## UI Controls
-
-| Control | Action |
-|---------|--------|
-| Click flight | Select and show details |
-| + Zoom / - Zoom | Adjust map range |
-| Speed buttons | 1x, 2x, 5x, 10x simulation speed |
-| Spawn Arrival | Create new inbound flight |
-| Spawn Departure | Create new outbound flight |
-| Restart | Save score and reset simulation |
-| Tabs | Active / Arrivals / Departures / History |
-
-## License
+## 📄 License
 
 MIT License

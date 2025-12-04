@@ -28,7 +28,128 @@ class ATCSimulator {
         this.history = { landed: [], departed: [] };
         this.currentSpeed = 1;
         
+        // Chat settings
+        this.maxChatMessages = 100;
+        this.chatAutoScroll = true;
+        
         this.init();
+    }
+    
+    // =========================================================================
+    // Chat Methods
+    // =========================================================================
+    
+    addChatMessage(type, sender, text, isImportant = false) {
+        const container = document.getElementById('chatMessages');
+        if (!container) return;
+        
+        // Remove welcome message if it exists
+        const welcome = container.querySelector('.chat-welcome');
+        if (welcome) welcome.remove();
+        
+        // Create message element
+        const msg = document.createElement('div');
+        msg.className = `chat-message ${type}${isImportant ? ' clearance' : ''}`;
+        
+        const time = new Date().toLocaleTimeString('en-US', { 
+            hour12: false, 
+            hour: '2-digit', 
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        
+        msg.innerHTML = `
+            <span class="msg-time">${time}</span>
+            <span class="msg-sender">${sender}:</span>
+            <span class="msg-text">${text}</span>
+        `;
+        
+        container.appendChild(msg);
+        
+        // Limit messages
+        while (container.children.length > this.maxChatMessages) {
+            container.removeChild(container.firstChild);
+        }
+        
+        // Auto-scroll
+        if (this.chatAutoScroll) {
+            container.scrollTop = container.scrollHeight;
+        }
+    }
+    
+    formatATCCommand(callsign, command) {
+        // Format the ATC command into readable text
+        const parts = [];
+        
+        if (command.waypoint) {
+            parts.push(`proceed direct ${command.waypoint}`);
+        }
+        if (command.altitude) {
+            const action = command.altitude > 5000 ? 'climb and maintain' : 'descend and maintain';
+            parts.push(`${action} ${command.altitude.toLocaleString()} feet`);
+        }
+        if (command.speed) {
+            parts.push(`reduce speed to ${command.speed} knots`);
+        }
+        if (command.heading) {
+            parts.push(`turn heading ${command.heading.toString().padStart(3, '0')}`);
+        }
+        if (command.clear_to_land) {
+            return `cleared to land runway 34`;
+        }
+        if (command.cleared_for_takeoff) {
+            return `cleared for takeoff runway 34, fly heading 340`;
+        }
+        
+        return parts.join(', ') || 'roger';
+    }
+    
+    formatFlightReadback(callsign, command) {
+        // Generate pilot readback
+        const parts = [];
+        
+        if (command.waypoint) {
+            parts.push(`direct ${command.waypoint}`);
+        }
+        if (command.altitude) {
+            parts.push(`${command.altitude.toLocaleString()}`);
+        }
+        if (command.speed) {
+            parts.push(`speed ${command.speed}`);
+        }
+        if (command.heading) {
+            parts.push(`heading ${command.heading.toString().padStart(3, '0')}`);
+        }
+        if (command.clear_to_land) {
+            return `cleared to land runway 34, ${callsign}`;
+        }
+        if (command.cleared_for_takeoff) {
+            return `cleared for takeoff runway 34, ${callsign}`;
+        }
+        
+        return parts.length > 0 ? `${parts.join(', ')}, ${callsign}` : `roger, ${callsign}`;
+    }
+    
+    handleATCMessage(data) {
+        // Handle incoming ATC communication
+        const { callsign, command, source } = data;
+        
+        // Determine if this is an important clearance
+        const isClearance = command.clear_to_land || command.cleared_for_takeoff;
+        
+        // Add ATC command
+        const atcText = this.formatATCCommand(callsign, command);
+        this.addChatMessage('atc', 'KRNT Tower', `${callsign}, ${atcText}`, isClearance);
+        
+        // Add flight readback after short delay
+        setTimeout(() => {
+            const readback = this.formatFlightReadback(callsign, command);
+            this.addChatMessage('flight', callsign, readback, isClearance);
+        }, 800 + Math.random() * 400);
+    }
+    
+    addSystemMessage(text) {
+        this.addChatMessage('system', 'SYSTEM', text);
     }
     
     async init() {
@@ -199,6 +320,7 @@ class ATCSimulator {
         
         this.ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
+            
             if (data.type === 'update') {
                 this.flights = data.flights;
                 this.stats = data.stats || this.stats;
@@ -218,6 +340,16 @@ class ATCSimulator {
                 if (this.stats.failed) {
                     this.showFailure();
                 }
+            }
+            
+            // Handle ATC radio communications
+            if (data.type === 'atc_message') {
+                this.handleATCMessage(data);
+            }
+            
+            // Handle system messages
+            if (data.type === 'system_message') {
+                this.addSystemMessage(data.text);
             }
         };
     }

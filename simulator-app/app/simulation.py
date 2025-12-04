@@ -471,24 +471,58 @@ class ATCSimulator:
         number = random.randint(100, 9999)
         return f"{airline}{number}"
     
+    def _find_safe_spawn_position(self, min_separation_nm: float = 5.0, max_attempts: int = 20) -> Optional[tuple[float, float]]:
+        """
+        Find a safe spawn position 25-35nm from airport with no nearby aircraft.
+        
+        Args:
+            min_separation_nm: Minimum distance from other airborne aircraft
+            max_attempts: Maximum attempts to find a safe position
+            
+        Returns:
+            Tuple of (x, y) coordinates or None if no safe position found
+        """
+        airborne = [f for f in self.flights.values() if f.is_airborne_active()]
+        
+        for _ in range(max_attempts):
+            # Random angle around the airport (0-360 degrees)
+            angle = random.uniform(0, 2 * math.pi)
+            # Random distance 25-35nm from airport
+            distance = random.uniform(25, 35)
+            
+            spawn_x = distance * math.sin(angle)
+            spawn_y = distance * math.cos(angle)
+            
+            # Check separation from all airborne aircraft
+            is_safe = True
+            for flight in airborne:
+                dx = spawn_x - flight.position.x
+                dy = spawn_y - flight.position.y
+                sep = math.sqrt(dx**2 + dy**2)
+                if sep < min_separation_nm:
+                    is_safe = False
+                    break
+            
+            if is_safe:
+                return (spawn_x, spawn_y)
+        
+        return None
+    
     def spawn_arrival(self) -> Optional[Flight]:
-        """Spawn a new arriving flight."""
+        """Spawn a new arriving flight 25-35nm from airport, heading towards runway."""
         if self.failed:
             return None
-            
-        entry_waypoints = ["NORTH", "SOUTH", "EAST", "WEST"]
-        entry = random.choice(entry_waypoints)
-        waypoint = WAYPOINTS[entry]
         
-        offset_angle = random.uniform(0, 2 * math.pi)
-        offset_dist = random.uniform(3, 8)
-        spawn_x = waypoint.position.x + offset_dist * math.cos(offset_angle)
-        spawn_y = waypoint.position.y + offset_dist * math.sin(offset_angle)
+        # Find a safe spawn position
+        spawn_pos = self._find_safe_spawn_position(min_separation_nm=5.0)
+        if spawn_pos is None:
+            print("[Simulator] Could not find safe spawn position - airspace too crowded")
+            return None
         
-        heading = math.degrees(math.atan2(
-            waypoint.position.x - spawn_x,
-            waypoint.position.y - spawn_y
-        )) % 360
+        spawn_x, spawn_y = spawn_pos
+        
+        # Calculate heading directly towards the runway (0, 0)
+        heading = math.degrees(math.atan2(-spawn_x, -spawn_y)) % 360
         
         aircraft_type = random.choice(list(AIRCRAFT_TYPES.keys()))
         
@@ -508,9 +542,9 @@ class ATCSimulator:
             destination=AIRPORT["icao"],
         )
         
-        flight.target_waypoint = entry
-        flight.current_waypoint = entry
-        flight.target_altitude = waypoint.altitude_restriction
+        # No initial waypoint - aircraft just flies towards runway
+        # AI agent will assign waypoints
+        flight.target_altitude = 6000
         flight.target_speed = 250
         
         self.flights[callsign] = flight

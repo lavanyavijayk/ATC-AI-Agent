@@ -1,15 +1,25 @@
 """FastAPI REST API endpoints for the ATC simulator."""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Any
 from .models import FlightData, FlightCommand, AirportData, LandingRules, Waypoint
 from .simulation import simulator
 
 router = APIRouter(prefix="/api", tags=["flights"])
 
+# Callback for broadcasting ATC messages (set by main.py)
+atc_message_callback = None
+
 
 class SpeedRequest(BaseModel):
     multiplier: float
+
+
+class ATCMessageRequest(BaseModel):
+    """Request to broadcast an ATC message to the UI"""
+    callsign: str
+    command: dict
+    source: str = "AI_AGENT"
 
 
 @router.get("/airport", response_model=AirportData)
@@ -72,6 +82,16 @@ async def command_flight(callsign: str, command: FlightCommand):
     result = simulator.command_flight(callsign, command)
     if not result["success"] and "not found" in result["message"]:
         raise HTTPException(status_code=404, detail=result["message"])
+    
+    # Broadcast ATC message to UI if command was successful
+    if result["success"] and atc_message_callback:
+        await atc_message_callback({
+            "type": "atc_message",
+            "callsign": callsign,
+            "command": command.model_dump(exclude_none=True),
+            "source": "ATC"
+        })
+    
     return {
         "status": "ok" if result["success"] else "error",
         "callsign": callsign,
@@ -173,3 +193,21 @@ async def get_flight_history():
     Returns the last 50 landed and last 50 departed flights.
     """
     return simulator.get_flight_history()
+
+
+@router.post("/atc/broadcast")
+async def broadcast_atc_message(message: ATCMessageRequest):
+    """
+    Broadcast an ATC message to the UI chat panel.
+    
+    Used by AI agents to display their commands in the chat.
+    """
+    if atc_message_callback:
+        await atc_message_callback({
+            "type": "atc_message",
+            "callsign": message.callsign,
+            "command": message.command,
+            "source": message.source
+        })
+        return {"status": "ok", "message": "Broadcast sent"}
+    return {"status": "error", "message": "No broadcast callback configured"}

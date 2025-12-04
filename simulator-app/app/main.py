@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
+from . import api
 from .api import router as api_router
 from .simulation import simulator
 
@@ -53,10 +54,20 @@ async def broadcast_updates(flights, stats, near_misses, history):
         })
 
 
+async def broadcast_atc_message(message: dict):
+    """Broadcast an ATC message to all connected clients."""
+    if manager.active_connections:
+        await manager.broadcast(message)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     simulator.update_callbacks.append(broadcast_updates)
+    
+    # Wire up ATC message broadcast callback
+    api.atc_message_callback = broadcast_atc_message
+    
     simulation_task = asyncio.create_task(simulator.run())
     
     yield

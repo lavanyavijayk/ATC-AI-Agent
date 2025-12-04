@@ -18,6 +18,7 @@ An online Air Traffic Control simulator designed for integration with agentic AI
 - 🌐 **WebSocket Updates** - Real-time flight position updates (10 Hz)
 - ⏱️ **Speed Control** - 1x, 2x, 5x, 10x simulation speed
 - 📜 **Flight History** - Track completed arrivals and departures
+- 📡 **ATC Radio Chat** - Live Twitch-style radio communications display
 
 ## Quick Start
 
@@ -128,12 +129,13 @@ http://localhost:8000/api
 
 | Endpoint | Description |
 |----------|-------------|
-| `/api/flights/{callsign}/command` | Send command to flight |
+| `/api/flights/{callsign}/command` | Send command to flight (auto-broadcasts to chat) |
 | `/api/simulation/spawn/arrival` | Spawn new arrival |
 | `/api/simulation/spawn/departure` | Spawn new departure |
 | `/api/simulation/speed` | Set speed multiplier |
 | `/api/simulation/restart` | Save score & restart |
 | `/api/simulation/end` | Save score & end |
+| `/api/atc/broadcast` | Broadcast ATC message to chat panel |
 
 ### Flight Commands
 
@@ -346,6 +348,75 @@ AI-ATC/
 | Spawn Departure | Create new outbound flight |
 | Restart | Save score and reset simulation |
 | Tabs | Active / Arrivals / Departures / History |
+
+## ATC Radio Chat
+
+The simulator includes a **Twitch-style live radio chat panel** that displays all ATC communications in real-time. This provides visibility into what the AI agent is doing.
+
+### Features
+
+- 🔴 **LIVE indicator** - Shows real-time radio activity
+- 📡 **Auto-broadcasts** - Commands sent via API automatically appear in chat
+- 🎙️ **Pilot readbacks** - Flights acknowledge commands with proper aviation phraseology
+- 🎨 **Color-coded messages:**
+  - 🟣 **Purple** - ATC (Tower) commands
+  - 🟢 **Green** - Flight acknowledgments
+  - 🟡 **Amber** - System messages
+  - 🔵 **Cyan highlight** - Clearances (landing/takeoff)
+
+### Example Chat Flow
+
+```
+14:32:15  KRNT Tower: UAL4527, proceed direct DOWNWIND, descend and maintain 2,000 feet
+14:32:16  UAL4527: direct DOWNWIND, 2,000, UAL4527
+
+14:33:45  KRNT Tower: UAL4527, cleared to land runway 34
+14:33:46  UAL4527: cleared to land runway 34, UAL4527
+
+14:35:12  KRNT Tower: DAL891, cleared for takeoff runway 34, fly heading 340
+14:35:13  DAL891: cleared for takeoff runway 34, DAL891
+```
+
+### How It Works
+
+1. AI Agent sends command via `/api/flights/{callsign}/command`
+2. Command is executed and **automatically broadcast** to WebSocket clients
+3. UI formats command into readable ATC phraseology
+4. After ~1 second delay, pilot readback appears
+
+### WebSocket Message Types
+
+The chat uses these WebSocket message types:
+
+```javascript
+// ATC command message (auto-sent when commands are issued)
+{
+  "type": "atc_message",
+  "callsign": "UAL4527",
+  "command": {"waypoint": "FINAL", "altitude": 1000},
+  "source": "ATC"
+}
+
+// System message
+{
+  "type": "system_message", 
+  "text": "New arrival entering airspace"
+}
+```
+
+### Manual Broadcast API
+
+You can also manually broadcast ATC messages:
+
+```bash
+curl -X POST http://localhost:8000/api/atc/broadcast \
+  -H "Content-Type: application/json" \
+  -d '{
+    "callsign": "UAL4527",
+    "command": {"waypoint": "HOLD", "altitude": 3000},
+    "source": "AI_AGENT"
+  }'
+```
 
 ## License
 

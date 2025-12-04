@@ -28,9 +28,7 @@ from database.atc_db import ATCDatabase
 from utils.llm import LLM
 from prompts.landing_prompt import LANDING_PROMPT
 from prompts.take_off_prompt import TAKE_OFF_PROMPT
-
-# API Base URL for the ATC Simulator
-API_BASE_URL = "http://localhost:8000/api"
+from config import API_BASE_URL
 
 
 # ============================================================================

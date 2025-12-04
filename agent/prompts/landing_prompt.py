@@ -61,17 +61,26 @@ Step 2: Route accordingly
 
 **STAGE 2: DOWNWIND TO BASE**
 
+**STAGE 2: DOWNWIND TO BASE**
+
 When aircraft reaches DOWNWIND:
-   - Check traffic on BASE leg
-   - **IF CLEAR:** Proceed to BASE
-   - **IF BLOCKED:** Hold at alternate waypoint, then return to DOWNWIND
+   - Check if there will be a COLLISION with traffic when aircraft reaches BASE
+   - Consider: By the time aircraft flies to BASE, where will other traffic be?
+   - **IF PATH AND DESTINATION WILL BE CLEAR:** Proceed to BASE
+   - **IF ACTUAL COLLISION LIKELY:** Hold at alternate waypoint, then return to DOWNWIND
+   
+   **Key Principle:** Don't redirect just because traffic *currently* occupies downstream stages. Only redirect if traffic will *still be there* creating a collision when your aircraft arrives.
 
 **STAGE 3: BASE TO FINAL**
 
 When aircraft reaches BASE:
-   - Check traffic on FINAL approach
-   - **IF CLEAR:** Proceed to FINAL
-   - **IF BLOCKED:** Redirect to holding waypoint, then return to DOWNWIND (restart sequence)
+   - Check if there will be a COLLISION with traffic when aircraft reaches FINAL
+   - Consider: By the time aircraft flies from BASE to FINAL, where will other traffic be?
+   - If traffic is on FINAL but has clearance to land, they will be gone before your aircraft arrives - path is CLEAR
+   - **IF PATH AND DESTINATION WILL BE CLEAR:** Proceed to FINAL
+   - **IF ACTUAL COLLISION LIKELY:** Redirect to holding waypoint, then return to DOWNWIND (restart sequence)
+   
+   **Key Principle:** Aircraft ahead in the sequence that are progressing normally will clear the area. Only redirect if they will still be occupying the same space when your aircraft arrives.
 
 **STAGE 4: FINAL TO LANDING**
 

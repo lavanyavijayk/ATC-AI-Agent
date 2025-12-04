@@ -34,26 +34,26 @@ To grant clearance, the Runway must be **STERILE**. Analyze the <traffic_situati
 **Example 1: Runway Occupied**
 *Input:* Traffic list shows Flight 101 has status "landing".
 *Logic:* Runway is active. Unsafe for departure.
-*Output:* {{"cleared_for_takeoff": false}}
+*Output:* {{"clear_for_takeoff": false}}
 
 **Example 2: Approach Conflict**
 *Input:* Flight 202 passed "FINAL" and is targeting "RUNWAY".
 *Logic:* Incoming traffic is on short final. Risk of collision.
-*Output:* {{"cleared_for_takeoff": false}}
+*Output:* {{"clear_for_takeoff": false}}
 
 **Example 3: Sterile Runway**
 *Input:* All other aircraft are at DOWNWIND, BASE, or nonexistent.
 *Logic:* Runway is empty, approach path is clear.
-*Output:* {{"cleared_for_takeoff": true}}
+*Output:* {{"clear_for_takeoff": true}}
 
 ### PART 4: EXECUTION
 Analyze the data. Return the decision as a JSON object.
 
 **If Safe:**
-{{"cleared_for_takeoff": true}}
+{{"clear_for_takeoff": true}}
 
 **If Unsafe:**
-{{"cleared_for_takeoff": false}}
+{{"clear_for_takeoff": false}}
 """
 
 # f"""You are an experienced Air Traffic Controller at a busy airport, responsible for the safe departure clearance of flight {callsign}. Your primary duty is to ensure the runway is clear and safe before authorizing takeoff.

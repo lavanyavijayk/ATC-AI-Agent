@@ -4,10 +4,12 @@ from database.flights_db import FlightDatabase
 from airport.airport import Airport
 from airport.runway import Runway
 from atc_agent import main
+from config import API_BASE_URL
+
 
 db = FlightDatabase()
 
-URL = "http://localhost:8000/api/flights/landing/"
+URL = f"{API_BASE_URL}/flights/"
 SLEEP_SECONDS = 5
 
 airport = Airport("JFK", "John F. Kennedy International Airport")
@@ -49,7 +51,7 @@ while True:
                 if flight["status"] in ["landing", "takeoff"]:
                     continue
 
-                if updated or (flight['flight_type']=="ready_for_takeoff" and not flight['cleared_for_takeoff']) or not flight['target_waypoint']:
+                if updated or (flight['status']=="ready_for_takeoff" and not flight['cleared_for_takeoff']) or not flight['target_waypoint']:
                     main(flight, airport)
 
         else:

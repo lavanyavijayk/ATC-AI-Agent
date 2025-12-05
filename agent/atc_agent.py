@@ -630,30 +630,31 @@ class ATCAgent:
             
             return state
         
-        # ----- LANDING PATTERN SAFETY CHECK (DOWNWIND -> BASE -> FINAL -> RUNWAY) -----
-        if last_checkpoint in landing_pattern_waypoints:
-            target_waypoint = command.get("waypoint", "")
-            print(f"[SAFETY] Checking landing pattern: {last_checkpoint} -> {target_waypoint}")
+        # # ----- LANDING PATTERN SAFETY CHECK (DOWNWIND -> BASE -> FINAL -> RUNWAY) -----
+        # if last_checkpoint in landing_pattern_waypoints:
+        #     target_waypoint = command.get("waypoint", "")
+        #     print(f"[SAFETY] Checking landing pattern: {last_checkpoint} -> {target_waypoint}")
             
-            for flight in flights:
-                flight_passed = flight.get("passed_waypoints", [])
-                flight_last = flight_passed[-1] if flight_passed else ""
-                flight_target = flight.get("target_waypoint", "")
+        #     for flight in flights:
+        #         flight_passed = flight.get("passed_waypoints", [])
+        #         flight_last = flight_passed[-1] if flight_passed else ""
+        #         flight_target = flight.get("target_waypoint", "")
                 
-                # Check if another flight is at the same checkpoint heading to same target
-                if flight_last == last_checkpoint and flight_target == target_waypoint:
-                    print(f"[SAFETY] FAILED: Route conflict with {flight.get('callsign', 'unknown')} "
-                          f"(both at {last_checkpoint} heading to {target_waypoint})")
-                    state['messages'].append({
-                        "role": "user",
-                        "content": f"Failed safety check - route conflict with: {flight}"
-                    })
-                    state["result"] = {}
-                    return state
+        #         # Check if another flight is at the same checkpoint heading to same target
+        #         if flight_last == last_checkpoint and flight_target == target_waypoint:
+        #             if not predict_conflict
+        #             print(f"[SAFETY] FAILED: Route conflict with {flight.get('callsign', 'unknown')} "
+        #                   f"(both at {last_checkpoint} heading to {target_waypoint})")
+        #             state['messages'].append({
+        #                 "role": "user",
+        #                 "content": f"Failed safety check - route conflict with: {flight}"
+        #             })
+        #             state["result"] = {}
+        #             return state
             
-            print("[SAFETY] Landing pattern safety check PASSED")
-            state["result"] = command
-            return state
+        #     print("[SAFETY] Landing pattern safety check PASSED")
+        #     state["result"] = command
+        #     return state
         
         # ----- EN-ROUTE COLLISION DETECTION (for random waypoints) -----
         # Only check against non-landing flights
